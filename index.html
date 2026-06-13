@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tangram Tracker</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #111; font-family: system-ui, sans-serif; color: #eee; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+#app { width: 100%; max-width: 560px; }
+h1 { font-size: 15px; font-weight: 500; padding: 8px 0 10px; color: #777; }
+
+#canvasWrap { position: relative; width: 100%; background: #000; border-radius: 10px; overflow: hidden; }
+#mainCanvas { display: block; width: 100%; cursor: crosshair; }
+#tapHint {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: rgba(0,0,0,0.82); color: #fff; font-size: 13px;
+  padding: 10px 18px; border-radius: 8px; text-align: center;
+  display: none; pointer-events: none; white-space: nowrap;
+}
+#crosshair {
+  position: absolute; display: none; pointer-events: none;
+  width: 24px; height: 24px; margin: -12px 0 0 -12px;
+}
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute; background: #fff;
+}
+#crosshair::before { width: 2px; height: 24px; left: 11px; top: 0; }
+#crosshair::after  { width: 24px; height: 2px; left: 0; top: 11px; }
+
+#status { font-size: 12px; color: #666; padding: 6px 0 2px; text-align: center; min-height: 20px; }
+#cvStatus { font-size: 11px; color: #555; text-align: center; padding-bottom: 4px; }
+
+button {
+  background: #1e1e1e; color: #ddd; border: 1px solid #383838;
+  border-radius: 8px; padding: 7px 14px; cursor: pointer; font-size: 13px;
+}
+button:hover { background: #282828; }
+button.active { background: #0d2a45; color: #7ab8f5; border-color: #4a90d9; }
+button.done   { background: #0d2e0d; color: #6fda6f; border-color: #4a9a4a; }
+button:disabled { opacity: 0.35; cursor: default; }
+
+#startBtn { display: block; width: 100%; padding: 11px; margin: 8px 0; font-size: 14px; }
+
+#controls {
+  display: none; gap: 6px; align-items: center;
+  padding: 6px 0; flex-wrap: wrap;
+}
+#controls label { font-size: 11px; color: #555; white-space: nowrap; }
+input[type=range] { accent-color: #4a90d9; }
+.ctrl-group { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 140px; }
+
+#ui { margin-top: 6px; }
+.piece-row { border-bottom: 1px solid #1c1c1c; padding: 4px 0; }
+.piece-main { display: flex; align-items: center; gap: 6px; }
+.piece-media { display: flex; align-items: center; gap: 6px; padding: 3px 0 2px 30px; }
+.swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid #333; flex-shrink: 0; }
+.media-thumb { width: 40px; height: 28px; border-radius: 3px; object-fit: cover; border: 1px solid #333; background: #111; display:none; }
+.media-thumb.on { display: block; }
+.media-name { font-size: 10px; color: #555; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 100px; }
+.upload-btn { font-size: 11px; padding: 3px 8px; }
+.clear-media-btn { font-size: 10px; padding: 2px 6px; opacity: 0.5; }
+.piece-label { font-size: 12px; color: #777; flex: 1; }
+.piece-stats { font-size: 10px; color: #444; min-width: 80px; font-family: monospace; }
+.cal-btn { font-size: 11px; padding: 3px 9px; }
+.clear-btn { font-size: 10px; padding: 2px 7px; opacity: 0.6; }
+
+#debugBar { display: flex; gap: 4px; flex-wrap: wrap; padding: 3px 0 1px; min-height: 20px; }
+.dbadge { font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+
+/* histogram */
+#histWrap { padding: 4px 0 0; }
+#histCanvas { display: block; width: 100%; height: 48px; border-radius: 6px; background: #0a0a0a; }
+#histLabel { font-size: 10px; color: #444; text-align: center; padding: 2px 0 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>Tangram color tracker — OpenCV.js</h1>
+
+  <div id="canvasWrap">
+    <canvas id="mainCanvas"></canvas>
+    <div id="tapHint"></div>
+    <div id="crosshair"></div>
+  </div>
+
+  <p id="cvStatus">Loading OpenCV.js…</p>
+  <p id="status"></p>
+  <button id="startBtn" disabled>Start camera</button>
+
+  <div id="controls">
+    <div class="ctrl-group">
+      <label>Hue tol <span id="htolVal">9</span>°</label>
+      <input type="range" id="htolRange" min="4" max="45" value="9" style="flex:1">
+    </div>
+    <div class="ctrl-group">
+      <label>Sat tol <span id="stolVal">48</span></label>
+      <input type="range" id="stolRange" min="10" max="120" value="48" style="flex:1">
+    </div>
+    <div class="ctrl-group">
+      <label>Val tol <span id="vtolVal">35</span></label>
+      <input type="range" id="vtolRange" min="10" max="150" value="35" style="flex:1">
+    </div>
+    <div class="ctrl-group">
+      <label>Min area <span id="minAreaVal">250</span></label>
+      <input type="range" id="minAreaRange" min="50" max="3000" value="250" step="50" style="flex:1">
+    </div>
+  </div>
+  <div id="calControls" style="display:none; gap:6px; padding:4px 0; flex-wrap:wrap;">
+    <button id="saveBtn" style="font-size:12px; padding:5px 12px;">💾 save calibration</button>
+    <button id="loadBtn" style="font-size:12px; padding:5px 12px;">📂 load calibration</button>
+    <button id="clearAllBtn" style="font-size:12px; padding:5px 12px; opacity:0.6;">✕ clear all</button>
+    <input type="file" id="loadFile" accept=".json" style="display:none">
+    <span id="calName" style="font-size:11px; color:#555; align-self:center;"></span>
+  </div>
+
+  <div id="debugBar"></div>
+  <div id="histWrap">
+    <canvas id="histCanvas" height="48"></canvas>
+    <p id="histLabel">hue histogram of camera frame — white ticks = calibrated pieces</p>
+  </div>
+  <div id="ui"></div>
+</div>
+
+<script async src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.12.0-release.1/dist/opencv.min.js"
+  crossorigin="anonymous"
+  onload="onOpenCvReady()"
+  onerror="document.getElementById('cvStatus').textContent='OpenCV.js failed to load'">
+</script>
+
+<script>
+// ── config ────────────────────────────────────────────────────────────────────
+
+const PIECES = [
+  { name: 'Piece 1', color: '#e05555' },
+  { name: 'Piece 2', color: '#e09055' },
+  { name: 'Piece 3', color: '#d4c820' },
+  { name: 'Piece 4', color: '#44b844' },
+  { name: 'Piece 5', color: '#2299cc' },
+  { name: 'Piece 6', color: '#7755dd' },
+  { name: 'Piece 7', color: '#cc44aa' },
+];
+const N = PIECES.length;
+
+// Smoothing: lerp factor for hull vertices each frame
+const LERP = 0.3;
+// Hull resampled to this many vertices for stable lerping
+const HULL_VERTS = 20;
+// OpenCV processing scale (lower = faster, less precise)
+const PROC_SCALE = 0.4;
+
+// ── state ─────────────────────────────────────────────────────────────────────
+
+const state = {
+  cvReady: false,
+  running: false,
+  calibrating: -1,
+  // per piece: { h, s, v } mean from calibration tap
+  calibrated: Array(N).fill(null),
+  // smoothed hull polygon per piece [[x,y]…] in main canvas px
+  smoothHulls: Array(N).fill(null),
+  frameCount: 0,
+};
+
+let htol    = 9;    // hue tolerance in OpenCV HSV units (0-180)
+let stol    = 48;   // saturation tolerance (0-255 scale)
+let vtol    = 35;   // value tolerance (0-255 scale)
+let minArea = 250;  // minimum contour area in proc-scale pixels²
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+
+const mainCanvas  = document.getElementById('mainCanvas');
+const mainCtx     = mainCanvas.getContext('2d', { willReadFrequently: false });
+const tapHint     = document.getElementById('tapHint');
+const crosshair   = document.getElementById('crosshair');
+const statusEl    = document.getElementById('status');
+const cvStatusEl  = document.getElementById('cvStatus');
+const startBtn    = document.getElementById('startBtn');
+const controlsEl  = document.getElementById('controls');
+const uiEl        = document.getElementById('ui');
+const debugBar    = document.getElementById('debugBar');
+const histCanvas  = document.getElementById('histCanvas');
+const histCtx     = histCanvas.getContext('2d');
+
+// hidden canvas for reading camera pixels at full res
+const readCanvas  = document.createElement('canvas');
+const readCtx     = readCanvas.getContext('2d', { willReadFrequently: true });
+
+const video = document.createElement('video');
+video.autoplay = true; video.playsInline = true; video.muted = true;
+
+// ── controls ──────────────────────────────────────────────────────────────────
+
+document.getElementById('htolRange').oninput = e => {
+  htol = +e.target.value;
+  document.getElementById('htolVal').textContent = htol;
+};
+document.getElementById('stolRange').oninput = e => {
+  stol = +e.target.value;
+  document.getElementById('stolVal').textContent = stol;
+};
+document.getElementById('vtolRange').oninput = e => {
+  vtol = +e.target.value;
+  document.getElementById('vtolVal').textContent = vtol;
+};
+document.getElementById('minAreaRange').oninput = e => {
+  minArea = +e.target.value;
+  document.getElementById('minAreaVal').textContent = minArea;
+};
+
+// ── colour helpers ────────────────────────────────────────────────────────────
+
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return [r, g, b];
+}
+
+// Standard RGB→HSV, returns h 0-360, s 0-1, v 0-1
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if      (max === r) h = ((g - b) / d + 6) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else                h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return [h, max > 0 ? d / max : 0, max];
+}
+
+// OpenCV HSV: H 0-180, S 0-255, V 0-255
+function toOcvHSV(h360, s01, v01) {
+  return [Math.round(h360 / 2), Math.round(s01 * 255), Math.round(v01 * 255)];
+}
+
+function hsvToHex(h360, s01, v01) {
+  const h = h360, s = s01, v = v01;
+  const f = n => {
+    const k = (n + h / 60) % 6;
+    return Math.round((v - v * s * Math.max(0, Math.min(k, 4 - k, 1))) * 255);
+  };
+  const r = f(5), g = f(3), b = f(1);
+  return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+// ── calibration tap ───────────────────────────────────────────────────────────
+
+mainCanvas.addEventListener('mousemove', e => {
+  if (state.calibrating < 0) return;
+  const rect = mainCanvas.getBoundingClientRect();
+  crosshair.style.left = (e.clientX - rect.left) + 'px';
+  crosshair.style.top  = (e.clientY - rect.top)  + 'px';
+});
+
+mainCanvas.addEventListener('click', e => {
+  if (state.calibrating < 0 || !state.running) return;
+  const rect  = mainCanvas.getBoundingClientRect();
+  const scaleX = readCanvas.width  / rect.width;
+  const scaleY = readCanvas.height / rect.height;
+  const px = Math.round((e.clientX - rect.left) * scaleX);
+  const py = Math.round((e.clientY - rect.top)  * scaleY);
+
+  // sample a 24×24 patch from the full-res read canvas
+  readCtx.drawImage(video, 0, 0, readCanvas.width, readCanvas.height);
+  const r  = 12;
+  const x0 = Math.max(0, px - r), y0 = Math.max(0, py - r);
+  const w  = Math.min(readCanvas.width  - x0, r * 2);
+  const h  = Math.min(readCanvas.height - y0, r * 2);
+  const data = readCtx.getImageData(x0, y0, w, h).data;
+
+  let hs = 0, ss = 0, vs = 0, n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const [hh, s, v] = rgb2hsv(data[i], data[i+1], data[i+2]);
+    if (s > 0.2 && v > 0.15) { hs += hh; ss += s; vs += v; n++; }
+  }
+  if (n < 4) { statusEl.textContent = 'Tap missed — too dark or unsaturated, try again'; return; }
+
+  const cal = { h: hs/n, s: ss/n, v: vs/n };
+  state.calibrated[state.calibrating] = cal;
+  state.smoothHulls[state.calibrating] = null;
+
+  statusEl.textContent =
+    `${PIECES[state.calibrating].name} → H=${Math.round(cal.h)}° S=${cal.s.toFixed(2)} V=${cal.v.toFixed(2)}`;
+  state.calibrating = -1;
+  tapHint.style.display = 'none';
+  crosshair.style.display = 'none';
+  buildUI();
+});
+
+// ── hull smoothing ────────────────────────────────────────────────────────────
+
+function resamplePoly(pts, n) {
+  // pts: [[x,y]…], returns n evenly-spaced points around the polygon
+  if (pts.length === 0) return [];
+  if (pts.length === n) return pts;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t  = (i / n) * pts.length;
+    const lo = Math.floor(t) % pts.length;
+    const hi = (lo + 1) % pts.length;
+    const f  = t - Math.floor(t);
+    out.push([
+      pts[lo][0] + (pts[hi][0] - pts[lo][0]) * f,
+      pts[lo][1] + (pts[hi][1] - pts[lo][1]) * f,
+    ]);
+  }
+  return out;
+}
+
+function lerpPoly(prev, next) {
+  if (!prev || prev.length !== next.length) return next;
+  return prev.map((p, i) => [
+    p[0] + (next[i][0] - p[0]) * LERP,
+    p[1] + (next[i][1] - p[1]) * LERP,
+  ]);
+}
+
+// ── OpenCV processing ─────────────────────────────────────────────────────────
+
+let src, hsv, mask, committed, kernel, contours, hierarchy;
+
+function allocOcvMats(w, h) {
+  [src, hsv, mask, committed, kernel, contours, hierarchy].forEach(m => {
+    try { if (m) m.delete(); } catch(e) {}
+  });
+  src       = new cv.Mat(h, w, cv.CV_8UC4);
+  hsv       = new cv.Mat(h, w, cv.CV_8UC3);
+  mask      = new cv.Mat(h, w, cv.CV_8UC1);
+  committed = new cv.Mat(h, w, cv.CV_8UC1); // union of all claimed pixels so far
+  kernel    = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
+  contours  = new cv.MatVector();
+  hierarchy = new cv.Mat();
+}
+
+function processFrame() {
+  if (!state.running || !state.cvReady) return;
+
+  const PW = Math.round(video.videoWidth  * PROC_SCALE);
+  const PH = Math.round(video.videoHeight * PROC_SCALE);
+  const MW = mainCanvas.width;
+  const MH = mainCanvas.height;
+  const scaleX = MW / PW;
+  const scaleY = MH / PH;
+
+  // draw video to read canvas (proc size) and grab pixels
+  readCtx.drawImage(video, 0, 0, PW, PH);
+  const imgData = readCtx.getImageData(0, 0, PW, PH);
+
+  // load into OpenCV src mat
+  src.cols = PW; src.rows = PH;
+  src.data.set(imgData.data);
+
+  // convert RGBA→RGB→HSV
+  cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+  cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+
+  // draw raw camera feed to main canvas
+  mainCtx.drawImage(video, 0, 0, MW, MH);
+
+  // hue histogram from HSV mat
+  drawHistogram(hsv, PW, PH, MW);
+
+  const counts = Array(N).fill(0);
+
+  // reset committed mask each frame
+  committed.setTo(new cv.Scalar(0));
+
+  // sort calibrated pieces by descending calibrated area from last frame
+  // so larger/more certain pieces claim pixels first
+  const order = Array.from({length: N}, (_,i) => i)
+    .filter(i => state.calibrated[i])
+    .sort((a, b) => (state.lastCounts?.[b] || 0) - (state.lastCounts?.[a] || 0));
+
+  for (const i of order) {
+    const cal = state.calibrated[i];
+    const [oh, os, ov] = toOcvHSV(cal.h, cal.s, cal.v);
+
+    const hLo = Math.max(0,   oh - htol);
+    const hHi = Math.min(180, oh + htol);
+    const sLo = Math.max(0,   os - stol);
+    const sHi = Math.min(255, os + stol);
+    const vLo = Math.max(0,   ov - vtol);
+    const vHi = Math.min(255, ov + vtol);
+
+    const lo = new cv.Mat(1, 3, cv.CV_8UC1);
+    const hi = new cv.Mat(1, 3, cv.CV_8UC1);
+    lo.data[0] = hLo; lo.data[1] = sLo; lo.data[2] = vLo;
+    hi.data[0] = hHi; hi.data[1] = sHi; hi.data[2] = vHi;
+    cv.inRange(hsv, lo, hi, mask);
+    lo.delete(); hi.delete();
+
+    // hue wrap for red (near 0° or 180°)
+    if (oh < htol) {
+      const lo2 = new cv.Mat(1,3,cv.CV_8UC1);
+      const hi2 = new cv.Mat(1,3,cv.CV_8UC1);
+      const mask2 = new cv.Mat();
+      lo2.data[0]=0; lo2.data[1]=sLo; lo2.data[2]=vLo;
+      hi2.data[0]=oh+htol; hi2.data[1]=sHi; hi2.data[2]=vHi;
+      cv.inRange(hsv, lo2, hi2, mask2);
+      cv.bitwise_or(mask, mask2, mask);
+      lo2.delete(); hi2.delete(); mask2.delete();
+    }
+    if (oh > 180 - htol) {
+      const lo2 = new cv.Mat(1,3,cv.CV_8UC1);
+      const hi2 = new cv.Mat(1,3,cv.CV_8UC1);
+      const mask2 = new cv.Mat();
+      lo2.data[0]=oh-htol; lo2.data[1]=sLo; lo2.data[2]=vLo;
+      hi2.data[0]=180;     hi2.data[1]=sHi; hi2.data[2]=vHi;
+      cv.inRange(hsv, lo2, hi2, mask2);
+      cv.bitwise_or(mask, mask2, mask);
+      lo2.delete(); hi2.delete(); mask2.delete();
+    }
+
+    // ── subtract pixels already claimed by earlier pieces ──
+    // invert committed mask and AND with current mask
+    const notCommitted = new cv.Mat();
+    cv.bitwise_not(committed, notCommitted);
+    cv.bitwise_and(mask, notCommitted, mask);
+    notCommitted.delete();
+
+    // morphological clean
+    cv.morphologyEx(mask, mask, cv.MORPH_OPEN,  kernel);
+    cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
+
+    // find contours
+    contours.delete(); hierarchy.delete();
+    contours  = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    // pick largest contour above minArea
+    let bestIdx = -1, bestArea = minArea;
+    for (let c = 0; c < contours.size(); c++) {
+      const area = cv.contourArea(contours.get(c));
+      if (area > bestArea) { bestArea = area; bestIdx = c; }
+    }
+
+    counts[i] = bestIdx >= 0 ? Math.round(bestArea) : 0;
+
+    if (bestIdx < 0) {
+      state.smoothHulls[i] = null;
+      continue;
+    }
+
+    // add winning contour pixels to committed mask so subsequent pieces can't claim them
+    const winMask = new cv.Mat.zeros(PH, PW, cv.CV_8UC1);
+    const vec = new cv.MatVector();
+    vec.push_back(contours.get(bestIdx));
+    cv.drawContours(winMask, vec, 0, new cv.Scalar(255), -1); // filled
+    cv.bitwise_or(committed, winMask, committed);
+    winMask.delete(); vec.delete();
+
+    // convex hull of best contour
+    const cnt  = contours.get(bestIdx);
+    const hull = new cv.Mat();
+    cv.convexHull(cnt, hull, false, true);
+
+    const pts = [];
+    for (let p = 0; p < hull.rows; p++) {
+      pts.push([
+        hull.data32S[p * 2]     * scaleX,
+        hull.data32S[p * 2 + 1] * scaleY,
+      ]);
+    }
+    hull.delete();
+
+    const resampled = resamplePoly(pts, HULL_VERTS);
+    state.smoothHulls[i] = lerpPoly(state.smoothHulls[i], resampled);
+
+    drawOverlay(state.smoothHulls[i], i, MW, MH);
+  }
+
+  state.lastCounts = counts;
+
+  // debug badges
+  debugBar.innerHTML = Array.from({length:N}, (_,i) => i).map(i => {
+    if (!state.calibrated[i]) return '';
+    const c = counts[i];
+    const col = hsvToHex(state.calibrated[i].h, state.calibrated[i].s, state.calibrated[i].v);
+    return c > 0
+      ? `<span class="dbadge" style="background:${col}22;color:${col};border:1px solid ${col}88">${PIECES[i].name} ${c}px²</span>`
+      : `<span class="dbadge" style="color:#444;border:1px solid #222">${PIECES[i].name} —</span>`;
+  }).join('');
+
+  requestAnimationFrame(processFrame);
+}
+
+// per piece: { type: 'image'|'video', el: HTMLImageElement|HTMLVideoElement } or null
+const pieceMedia = Array(N).fill(null);
+
+function drawOverlay(hull, i, MW, MH) {
+  if (!hull || hull.length < 3) return;
+  const cal = state.calibrated[i];
+  const color = hsvToHex(cal.h, cal.s, cal.v);
+
+  mainCtx.save();
+  mainCtx.beginPath();
+  mainCtx.moveTo(hull[0][0], hull[0][1]);
+  for (let j = 1; j < hull.length; j++) mainCtx.lineTo(hull[j][0], hull[j][1]);
+  mainCtx.closePath();
+  mainCtx.clip();
+
+  const media = pieceMedia[i];
+  if (media && (media.type === 'image' || (media.type === 'video' && !media.el.paused))) {
+    // fit media into hull bounding box, preserving aspect ratio
+    const xs = hull.map(p => p[0]), ys = hull.map(p => p[1]);
+    const bx = Math.min(...xs), by = Math.min(...ys);
+    const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+    const mw = media.el.videoWidth  || media.el.naturalWidth  || 1;
+    const mh = media.el.videoHeight || media.el.naturalHeight || 1;
+    const scale = Math.max(bw / mw, bh / mh);
+    const dw = mw * scale, dh = mh * scale;
+    const dx = bx + (bw - dw) / 2, dy = by + (bh - dh) / 2;
+    mainCtx.globalAlpha = 0.92;
+    mainCtx.drawImage(media.el, dx, dy, dw, dh);
+    mainCtx.globalAlpha = 1;
+  } else {
+    // fallback: semi-transparent color fill
+    mainCtx.globalAlpha = 0.45;
+    mainCtx.fillStyle = color;
+    mainCtx.fillRect(0, 0, MW, MH);
+    mainCtx.globalAlpha = 1;
+  }
+
+  mainCtx.restore();
+
+  // outline
+  mainCtx.save();
+  mainCtx.strokeStyle = color;
+  mainCtx.lineWidth = 2;
+  mainCtx.beginPath();
+  mainCtx.moveTo(hull[0][0], hull[0][1]);
+  for (let j = 1; j < hull.length; j++) mainCtx.lineTo(hull[j][0], hull[j][1]);
+  mainCtx.closePath();
+  mainCtx.stroke();
+  mainCtx.restore();
+}
+
+// ── hue histogram ─────────────────────────────────────────────────────────────
+
+function drawHistogram(hsvMat, PW, PH, MW) {
+  const BINS = 90; // 2° per bin
+  const buckets = new Uint32Array(BINS);
+  const data = hsvMat.data; // U8, 3 channels: H S V
+
+  for (let i = 0; i < data.length; i += 3) {
+    const h = data[i], s = data[i+1], v = data[i+2];
+    if (s > 50 && v > 40) {
+      buckets[Math.min(BINS-1, Math.floor(h / 2))]++;
+    }
+  }
+
+  const maxB = Math.max(...buckets, 1);
+  const HW = histCanvas.width = MW;
+  const HH = 48;
+  histCtx.clearRect(0, 0, HW, HH);
+  histCtx.fillStyle = '#0a0a0a';
+  histCtx.fillRect(0, 0, HW, HH);
+
+  const barW = HW / BINS;
+  for (let b = 0; b < BINS; b++) {
+    const bh = (buckets[b] / maxB) * (HH - 4);
+    const hue = b * 2; // degrees
+    histCtx.fillStyle = `hsl(${hue},85%,52%)`;
+    histCtx.fillRect(b * barW, HH - bh, barW - 0.5, bh);
+  }
+
+  // calibrated piece tick marks
+  for (let i = 0; i < N; i++) {
+    if (!state.calibrated[i]) continue;
+    const xPos = (state.calibrated[i].h / 360) * HW;
+    histCtx.strokeStyle = '#fff';
+    histCtx.lineWidth = 1.5;
+    histCtx.beginPath();
+    histCtx.moveTo(xPos, 0);
+    histCtx.lineTo(xPos, HH);
+    histCtx.stroke();
+    histCtx.fillStyle = '#fff';
+    histCtx.font = 'bold 9px monospace';
+    histCtx.fillText(`P${i+1}`, xPos + 2, 10);
+  }
+}
+
+// ── UI ────────────────────────────────────────────────────────────────────────
+
+function hueDiff360(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function conflictsWith(i) {
+  const cal = state.calibrated[i];
+  if (!cal) return null;
+  for (let j = 0; j < N; j++) {
+    if (j === i || !state.calibrated[j]) continue;
+    if (hueDiff360(cal.h, state.calibrated[j].h) < htol * 2) return j;
+  }
+  return null;
+}
+
+function buildUI() {
+  uiEl.innerHTML = '';
+  PIECES.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'piece-row';
+
+    // ── top line: swatch, name, stats, calibrate, clear ──
+    const main = document.createElement('div');
+    main.className = 'piece-main';
+
+    const sw = document.createElement('div');
+    sw.className = 'swatch';
+    const cal = state.calibrated[i];
+    sw.style.background = cal ? hsvToHex(cal.h, cal.s, cal.v) : p.color;
+    sw.style.opacity = cal ? '1' : '0.35';
+
+    const lbl = document.createElement('span');
+    lbl.className = 'piece-label';
+    const conflict = conflictsWith(i);
+    lbl.textContent = p.name;
+    if (conflict !== null) {
+      const dist = Math.round(hueDiff360(cal.h, state.calibrated[conflict].h));
+      lbl.textContent += ` ⚠ ~${dist}°`;
+      lbl.style.color = '#c84';
+    }
+
+    const stats = document.createElement('span');
+    stats.className = 'piece-stats';
+    stats.textContent = cal ? `H${Math.round(cal.h)}° S${cal.s.toFixed(2)}` : '—';
+
+    const calBtn = document.createElement('button');
+    calBtn.className = 'cal-btn' +
+      (state.calibrating === i ? ' active' : '') +
+      (cal ? ' done' : '');
+    calBtn.textContent = cal ? '✓ recal' : 'calibrate';
+    calBtn.disabled = !state.running;
+    calBtn.onclick = () => {
+      state.calibrating = state.calibrating === i ? -1 : i;
+      const on = state.calibrating >= 0;
+      tapHint.style.display   = on ? 'block' : 'none';
+      crosshair.style.display = on ? 'block' : 'none';
+      tapHint.textContent = on ? `Tap the ${PIECES[state.calibrating].name} in the frame` : '';
+      buildUI();
+    };
+
+    const clrBtn = document.createElement('button');
+    clrBtn.className = 'clear-btn';
+    clrBtn.textContent = '✕';
+    clrBtn.title = 'Clear calibration';
+    clrBtn.disabled = !cal;
+    clrBtn.onclick = () => {
+      state.calibrated[i] = null;
+      state.smoothHulls[i] = null;
+      buildUI();
+    };
+
+    main.append(sw, lbl, stats, calBtn, clrBtn);
+
+    // ── media row: thumb, upload btn, clear ──
+    const mediaRow = document.createElement('div');
+    mediaRow.className = 'piece-media';
+
+    const thumb = document.createElement('img');
+    thumb.className = 'media-thumb' + (pieceMedia[i] ? ' on' : '');
+    thumb.id = `thumb${i}`;
+    if (pieceMedia[i]) {
+      if (pieceMedia[i].type === 'image') {
+        thumb.src = pieceMedia[i].el.src;
+      } else {
+        // video — draw first frame to a temp canvas for thumbnail
+        const tc = document.createElement('canvas');
+        tc.width = 40; tc.height = 28;
+        try { tc.getContext('2d').drawImage(pieceMedia[i].el, 0, 0, 40, 28); } catch(e){}
+        thumb.src = tc.toDataURL();
+      }
+    }
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'media-name';
+    nameEl.textContent = pieceMedia[i] ? pieceMedia[i].name : 'no media';
+
+    // hidden file input — accepts image + video, triggers camera roll on mobile
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*,video/*';
+    fileInput.capture = ''; // don't force camera; lets user choose file or camera
+    fileInput.style.display = 'none';
+    fileInput.onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      if (file.type.startsWith('image/')) {
+        const img = new Image();
+        img.onload = () => {
+          if (pieceMedia[i]) URL.revokeObjectURL(pieceMedia[i].url);
+          pieceMedia[i] = { type: 'image', el: img, url, name: file.name };
+          buildUI();
+        };
+        img.src = url;
+      } else if (file.type.startsWith('video/')) {
+        const vid = document.createElement('video');
+        vid.src = url;
+        vid.loop = true;
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.autoplay = true;
+        vid.onloadeddata = () => {
+          vid.play();
+          if (pieceMedia[i]) URL.revokeObjectURL(pieceMedia[i].url);
+          pieceMedia[i] = { type: 'video', el: vid, url, name: file.name };
+          buildUI();
+        };
+      }
+      e.target.value = '';
+    };
+
+    const upBtn = document.createElement('button');
+    upBtn.className = 'upload-btn';
+    upBtn.textContent = pieceMedia[i] ? '⟳ swap' : '+ media';
+    upBtn.onclick = () => fileInput.click();
+
+    const clrMediaBtn = document.createElement('button');
+    clrMediaBtn.className = 'clear-media-btn';
+    clrMediaBtn.textContent = '✕';
+    clrMediaBtn.disabled = !pieceMedia[i];
+    clrMediaBtn.onclick = () => {
+      if (pieceMedia[i]) URL.revokeObjectURL(pieceMedia[i].url);
+      pieceMedia[i] = null;
+      buildUI();
+    };
+
+    mediaRow.append(thumb, nameEl, fileInput, upBtn, clrMediaBtn);
+    row.append(main, mediaRow);
+    uiEl.appendChild(row);
+  });
+}
+
+// ── save / load calibration ───────────────────────────────────────────────────
+
+function getCalData() {
+  return {
+    htol, stol, vtol, minArea,
+    pieces: state.calibrated.map((c, i) => c ? { ...c, name: PIECES[i].name } : null),
+  };
+}
+
+function applyCalData(data) {
+  if (data.htol    !== undefined) { htol    = data.htol;    document.getElementById('htolRange').value  = htol;    document.getElementById('htolVal').textContent  = htol; }
+  if (data.stol    !== undefined) { stol    = data.stol;    document.getElementById('stolRange').value  = stol;    document.getElementById('stolVal').textContent  = stol; }
+  if (data.vtol    !== undefined) { vtol    = data.vtol;    document.getElementById('vtolRange').value  = vtol;    document.getElementById('vtolVal').textContent  = vtol; }
+  if (data.minArea !== undefined) { minArea = data.minArea; document.getElementById('minAreaRange').value = minArea; document.getElementById('minAreaVal').textContent = minArea; }
+  if (Array.isArray(data.pieces)) {
+    data.pieces.forEach((c, i) => {
+      state.calibrated[i] = c ? { h: c.h, s: c.s, v: c.v } : null;
+      state.smoothHulls[i] = null;
+    });
+  }
+  buildUI();
+}
+
+document.getElementById('saveBtn').onclick = () => {
+  const data = JSON.stringify(getCalData(), null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'tangram-calibration.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('calName').textContent = 'saved ✓';
+};
+
+document.getElementById('loadBtn').onclick = () => {
+  document.getElementById('loadFile').click();
+};
+
+document.getElementById('loadFile').onchange = e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      applyCalData(data);
+      document.getElementById('calName').textContent = `loaded: ${file.name}`;
+      statusEl.textContent = 'Calibration loaded — start camera to begin tracking';
+    } catch(err) {
+      statusEl.textContent = 'Failed to parse calibration file';
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+};
+
+document.getElementById('clearAllBtn').onclick = () => {
+  if (!confirm('Clear all calibrations?')) return;
+  state.calibrated = Array(N).fill(null);
+  state.smoothHulls = Array(N).fill(null);
+  document.getElementById('calName').textContent = '';
+  buildUI();
+};
+
+// ── camera start ──────────────────────────────────────────────────────────────
+
+startBtn.onclick = async () => {
+  try {
+    statusEl.textContent = 'Requesting camera…';
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: {ideal: 640}, height: {ideal: 480} },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    const VW = video.videoWidth  || 640;
+    const VH = video.videoHeight || 480;
+    mainCanvas.width  = VW;
+    mainCanvas.height = VH;
+    readCanvas.width  = Math.round(VW * PROC_SCALE);
+    readCanvas.height = Math.round(VH * PROC_SCALE);
+
+    allocOcvMats(readCanvas.width, readCanvas.height);
+
+    state.running = true;
+    startBtn.style.display = 'none';
+    controlsEl.style.display = 'flex';
+    document.getElementById('calControls').style.display = 'flex';
+    statusEl.textContent = 'Running — tap "calibrate" then tap a piece in the frame';
+    buildUI();
+    processFrame();
+  } catch(e) {
+    statusEl.textContent = 'Camera error: ' + e.message;
+  }
+};
+
+// ── OpenCV ready callback ─────────────────────────────────────────────────────
+
+function onOpenCvLoadError() {
+  cvStatusEl.textContent = 'Primary CDN failed — trying fallback…';
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js';
+  s.crossOrigin = 'anonymous';
+  s.onload = onOpenCvReady;
+  s.onerror = () => { cvStatusEl.textContent = 'OpenCV.js failed to load from both sources. Check network.'; };
+  document.head.appendChild(s);
+}
+
+function onOpenCvReady() {
+  // cv.js calls this but cv may still be a promise in some builds
+  const init = () => {
+    if (typeof cv === 'undefined' || cv.Mat === undefined) {
+      setTimeout(init, 100);
+      return;
+    }
+    state.cvReady = true;
+    cvStatusEl.textContent = `OpenCV.js ${cv.getBuildInformation().split('\n')[0].split(':')[1]?.trim() || 'ready'}`;
+    startBtn.disabled = false;
+    buildUI();
+  };
+  init();
+}
+
+// fallback poll in case onload fires before cv is fully initialised
+setTimeout(() => {
+  if (!state.cvReady && typeof cv !== 'undefined') onOpenCvReady();
+}, 3000);
+
+buildUI();
+</script>
+</body>
+</html>
