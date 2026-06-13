@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tangram">
 <title>Tangram Tracker</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -72,6 +76,27 @@ input[type=range] { accent-color: #4a90d9; }
 #histWrap { padding: 4px 0 0; }
 #histCanvas { display: block; width: 100%; height: 48px; border-radius: 6px; background: #0a0a0a; }
 #histLabel { font-size: 10px; color: #444; text-align: center; padding: 2px 0 6px; }
+
+/* immersive / present mode — canvas fills the whole viewport, UI hidden */
+body.immersive { padding: 0; overflow: hidden; }
+body.immersive #app { max-width: none; }
+body.immersive #app > *:not(#canvasWrap) { display: none !important; }
+body.immersive #canvasWrap {
+  position: fixed; inset: 0; z-index: 1000;
+  width: 100vw; height: 100vh; height: 100dvh;
+  border-radius: 0; background: #000;
+}
+body.immersive #mainCanvas {
+  width: 100%; height: 100%; object-fit: cover; cursor: default;
+}
+#exitFs {
+  display: none; position: absolute; z-index: 1001;
+  top: calc(env(safe-area-inset-top, 0px) + 10px); right: 12px;
+  background: rgba(0,0,0,0.55); color: #fff; border: 1px solid #666;
+  border-radius: 20px; padding: 8px 14px; font-size: 13px; backdrop-filter: blur(4px);
+}
+body.immersive #exitFs { display: block; }
+#fsBtn { font-size: 12px; padding: 5px 12px; }
 </style>
 </head>
 <body>
@@ -82,6 +107,7 @@ input[type=range] { accent-color: #4a90d9; }
     <canvas id="mainCanvas"></canvas>
     <div id="tapHint"></div>
     <div id="crosshair"></div>
+    <button id="exitFs">✕ exit</button>
   </div>
 
   <p id="cvStatus">No external libraries — ready when you are.</p>
@@ -110,6 +136,7 @@ input[type=range] { accent-color: #4a90d9; }
     <button id="saveBtn" style="font-size:12px; padding:5px 12px;">💾 save calibration</button>
     <button id="loadBtn" style="font-size:12px; padding:5px 12px;">📂 load calibration</button>
     <button id="clearAllBtn" style="font-size:12px; padding:5px 12px; opacity:0.6;">✕ clear all</button>
+    <button id="fsBtn">⛶ fullscreen</button>
     <input type="file" id="loadFile" accept=".json" style="display:none">
     <span id="calName" style="font-size:11px; color:#555; align-self:center;"></span>
   </div>
@@ -934,6 +961,40 @@ startBtn.onclick = async () => {
         ? ' — iOS requires HTTPS for camera access.' : '');
   }
 };
+
+// ── fullscreen / immersive present mode ─────────────────────────────────────
+
+const fsBtn  = document.getElementById('fsBtn');
+const exitFs = document.getElementById('exitFs');
+
+function enterImmersive() {
+  document.body.classList.add('immersive');
+  // Real Fullscreen API where it exists (desktop / Android / iPadOS).
+  // iPhone Safari has no element fullscreen — the CSS class handles layout there.
+  const wrap = document.getElementById('canvasWrap');
+  const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+  if (req) { try { const p = req.call(wrap); if (p && p.catch) p.catch(()=>{}); } catch(e){} }
+  setTimeout(() => window.scrollTo(0, 1), 80); // nudge Safari toolbars to collapse
+}
+
+function exitImmersive() {
+  document.body.classList.remove('immersive');
+  const ex = document.exitFullscreen || document.webkitExitFullscreen;
+  if (ex && (document.fullscreenElement || document.webkitFullscreenElement)) {
+    try { const p = ex.call(document); if (p && p.catch) p.catch(()=>{}); } catch(e){}
+  }
+}
+
+fsBtn.onclick  = enterImmersive;
+exitFs.onclick = exitImmersive;
+
+// keep the class in sync if the user exits real fullscreen via Esc / system gesture
+const onFsChange = () => {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement)
+    document.body.classList.remove('immersive');
+};
+document.addEventListener('fullscreenchange', onFsChange);
+document.addEventListener('webkitfullscreenchange', onFsChange);
 
 buildUI();
 </script>
