@@ -567,7 +567,7 @@ const pieceMedia = Array(N).fill(null);
 function disposeMedia(i) {
   const m = pieceMedia[i];
   if (!m) return;
-  URL.revokeObjectURL(m.url);
+  if (m.url) URL.revokeObjectURL(m.url);
   if (m.type === 'video') { try { m.el.pause(); m.el.remove(); } catch(e){} }
   pieceMedia[i] = null;
 }
@@ -758,15 +758,12 @@ function buildUI() {
     fileInput.onchange = e => {
       const file = e.target.files[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
 
-      // iOS Photos/Files often report an empty or odd file.type — decide by
-      // extension too, and default everything else to image.
       const ext = (file.name.split('.').pop() || '').toLowerCase();
       const isVideo = file.type.startsWith('video/') ||
                       ['mov','mp4','m4v','webm','ogv','3gp','avi'].includes(ext);
 
-      const setMedia = (type, el) => {
+      const setMedia = (type, el, url) => {
         disposeMedia(i);
         pieceMedia[i] = { type, el, url, name: file.name };
         statusEl.textContent = `${PIECES[i].name}: ${type} attached`;
@@ -774,29 +771,43 @@ function buildUI() {
       };
 
       if (isVideo) {
+        // blob: URL attached via a <source> child — the documented iOS-safe
+        // path for video (src-attribute blob URLs are flaky on Safari).
+        const url = URL.createObjectURL(file);
         const vid = document.createElement('video');
-        vid.src = url;
         vid.loop = true; vid.muted = true; vid.playsInline = true;
         vid.setAttribute('playsinline', '');
         vid.setAttribute('webkit-playsinline', '');
-        // iOS won't decode frames from a detached video — keep it in the DOM,
-        // on-screen but effectively invisible.
+        const srcEl = document.createElement('source');
+        srcEl.src = url; srcEl.type = file.type || 'video/mp4';
+        vid.appendChild(srcEl);
+        // iOS won't decode frames from a detached/hidden video — keep it in the
+        // DOM, on-screen but effectively invisible.
         vid.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
         document.body.appendChild(vid);
-        const start = () => vid.play().then(() => setMedia('video', vid))
-          .catch(() => { setMedia('video', vid);
+        vid.load();
+        const start = () => vid.play().then(() => setMedia('video', vid, url))
+          .catch(() => { setMedia('video', vid, url);
             statusEl.textContent = `${PIECES[i].name}: tap the video area once to start playback`; });
         if (vid.readyState >= 2) start();
         else vid.addEventListener('loadeddata', start, { once: true });
-        vid.onerror = () => { statusEl.textContent = 'Could not load that video'; URL.revokeObjectURL(url); };
-      } else {
-        const img = new Image();
-        img.onload  = () => setMedia('image', img);
-        img.onerror = () => {
-          statusEl.textContent = 'Could not decode image — if it’s HEIC, set iOS Camera → Formats to “Most Compatible”, or use a JPG/PNG';
+        vid.onerror = () => {
+          statusEl.textContent = 'Video failed — if testing in an in-app preview, open the file in Safari instead';
           URL.revokeObjectURL(url);
         };
-        img.src = url;
+      } else {
+        // Images: read as a data URL instead of a blob URL. Data URLs are
+        // origin-independent, so they load even in sandboxed iframes
+        // (blob:null) and dodge Safari's blob-into-<img> quirks.
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload  = () => setMedia('image', img, null);
+          img.onerror = () => { statusEl.textContent = 'Decoded but failed to render — try a JPG or PNG'; };
+          img.src = reader.result;   // data:image/...;base64,...
+        };
+        reader.onerror = () => { statusEl.textContent = 'Could not read that file'; };
+        reader.readAsDataURL(file);
       }
       e.target.value = '';
     };
