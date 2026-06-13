@@ -86,7 +86,7 @@ input[type=range] { accent-color: #4a90d9; }
 
   <p id="cvStatus">Loading OpenCV.js…</p>
   <p id="status"></p>
-  <button id="startBtn" disabled>Start camera</button>
+  <button id="startBtn">Start camera</button>
 
   <div id="controls">
     <div class="ctrl-group">
@@ -822,51 +822,80 @@ startBtn.onclick = async () => {
     readCanvas.width  = Math.round(VW * PROC_SCALE);
     readCanvas.height = Math.round(VH * PROC_SCALE);
 
-    allocOcvMats(readCanvas.width, readCanvas.height);
-
     state.running = true;
     startBtn.style.display = 'none';
     controlsEl.style.display = 'flex';
     document.getElementById('calControls').style.display = 'flex';
-    statusEl.textContent = 'Running — tap "calibrate" then tap a piece in the frame';
     buildUI();
-    processFrame();
+
+    if (state.cvReady) {
+      // OpenCV already loaded — start tracking immediately
+      allocOcvMats(readCanvas.width, readCanvas.height);
+      statusEl.textContent = 'Running — tap "calibrate" then tap a piece in the frame';
+      processFrame();
+    } else {
+      // Camera is live but OpenCV still loading — show preview, wait for cv
+      statusEl.textContent = 'Camera ready — waiting for OpenCV to finish loading…';
+      state.pendingStart = true;
+      previewLoop();
+    }
   } catch(e) {
     statusEl.textContent = 'Camera error: ' + e.message;
   }
 };
 
+// Raw camera preview loop used before OpenCV is ready
+function previewLoop() {
+  if (!state.running) return;
+  mainCtx.drawImage(video, 0, 0, mainCanvas.width, mainCanvas.height);
+  if (state.cvReady) {
+    // OpenCV became ready — hand off to full processing loop
+    allocOcvMats(readCanvas.width, readCanvas.height);
+    statusEl.textContent = 'OpenCV ready — tap "calibrate" then tap a piece in the frame';
+    state.pendingStart = false;
+    processFrame();
+    return;
+  }
+  requestAnimationFrame(previewLoop);
+}
+
 // ── OpenCV ready callback ─────────────────────────────────────────────────────
 
 function onOpenCvLoadError() {
-  cvStatusEl.textContent = 'Primary CDN failed — trying fallback…';
-  const s = document.createElement('script');
-  s.src = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js';
-  s.crossOrigin = 'anonymous';
-  s.onload = onOpenCvReady;
-  s.onerror = () => { cvStatusEl.textContent = 'OpenCV.js failed to load from both sources. Check network.'; };
-  document.head.appendChild(s);
+  cvStatusEl.textContent = 'CDN load failed — check connection and reload';
 }
 
 function onOpenCvReady() {
-  // cv.js calls this but cv may still be a promise in some builds
-  const init = () => {
-    if (typeof cv === 'undefined' || cv.Mat === undefined) {
-      setTimeout(init, 100);
-      return;
-    }
-    state.cvReady = true;
-    cvStatusEl.textContent = `OpenCV.js ${cv.getBuildInformation().split('\n')[0].split(':')[1]?.trim() || 'ready'}`;
-    startBtn.disabled = false;
-    buildUI();
+  // The script onload fires when JS is parsed, but WASM binary still
+  // needs to compile. Use onRuntimeInitialized for the real ready signal.
+  const tryInit = () => {
+    if (typeof cv === 'undefined') { setTimeout(tryInit, 200); return; }
+
+    // cv may be a promise (some builds) or an object
+    Promise.resolve(typeof cv.then === 'function' ? cv : null).then(() => {
+      // Now hook onRuntimeInitialized — if Mat already exists, it's done
+      if (cv.Mat) {
+        markCvReady();
+      } else {
+        cv.onRuntimeInitialized = markCvReady;
+        // Safety timeout: if WASM never fires, report the error
+        setTimeout(() => {
+          if (!state.cvReady) {
+            cvStatusEl.textContent = 'OpenCV WASM timed out — try reloading on WiFi';
+          }
+        }, 30000);
+      }
+    });
   };
-  init();
+  tryInit();
 }
 
-// fallback poll in case onload fires before cv is fully initialised
-setTimeout(() => {
-  if (!state.cvReady && typeof cv !== 'undefined') onOpenCvReady();
-}, 3000);
+function markCvReady() {
+  if (state.cvReady) return;
+  state.cvReady = true;
+  cvStatusEl.textContent = 'OpenCV.js ready';
+  // If camera was started before cv was ready, previewLoop will hand off automatically
+}
 
 buildUI();
 </script>
