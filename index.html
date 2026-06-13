@@ -97,6 +97,7 @@ body.immersive #mainCanvas {
 }
 body.immersive #exitFs { display: block; }
 #fsBtn { font-size: 12px; padding: 5px 12px; }
+#rotBtn, #flipBtn { font-size: 12px; padding: 5px 12px; }
 </style>
 </head>
 <body>
@@ -137,6 +138,8 @@ body.immersive #exitFs { display: block; }
     <button id="loadBtn" style="font-size:12px; padding:5px 12px;">📂 load calibration</button>
     <button id="clearAllBtn" style="font-size:12px; padding:5px 12px; opacity:0.6;">✕ clear all</button>
     <button id="fsBtn">⛶ fullscreen</button>
+    <button id="rotBtn">⟳ 0°</button>
+    <button id="flipBtn">⇋ flip</button>
     <input type="file" id="loadFile" accept=".json" style="display:none">
     <span id="calName" style="font-size:11px; color:#555; align-self:center;"></span>
   </div>
@@ -190,6 +193,9 @@ let stol    = 48;   // saturation tolerance on 0-255 scale (÷255 = fraction)
 let vtol    = 35;   // value tolerance on 0-255 scale (÷255 = fraction)
 let minArea = 250;  // minimum blob area in proc-scale pixels
 
+let rotation = 0;   // display/capture rotation: 0 | 90 | 180 | 270
+let mirror   = false; // horizontal flip
+
 // ── per-frame work buffers (allocated once camera starts) ───────────────────────
 
 let bufW = 0, bufH = 0;
@@ -207,6 +213,39 @@ function allocBuffers(w, h) {
   committedBuf = new Uint8Array(n);
   silMinX = new Int32Array(h); silMaxX = new Int32Array(h);
   bufW = w; bufH = h;
+}
+
+// Draw the video into ctx (sized dw×dh) applying the current rotation + mirror.
+// The SAME transform is used for the proc/read canvas, the display canvas, and
+// the calibration sampler, so tracking, overlays, and taps share one frame.
+function drawOriented(ctx, dw, dh) {
+  const swap = (rotation === 90 || rotation === 270);
+  const bw = swap ? dh : dw;   // un-rotated footprint to draw the source into
+  const bh = swap ? dw : dh;
+  ctx.save();
+  ctx.translate(dw / 2, dh / 2);
+  ctx.rotate(rotation * Math.PI / 180);
+  if (mirror) ctx.scale(-1, 1);
+  ctx.drawImage(video, -bw / 2, -bh / 2, bw, bh);
+  ctx.restore();
+}
+
+// (Re)size main + proc canvases and buffers for the current rotation.
+function applyOrientation() {
+  const VW = video.videoWidth  || 640;
+  const VH = video.videoHeight || 480;
+  const swap = (rotation === 90 || rotation === 270);
+  const MW = swap ? VH : VW;
+  const MH = swap ? VW : VH;
+  mainCanvas.width  = MW;
+  mainCanvas.height = MH;
+  const PW = Math.max(1, Math.round(MW * PROC_SCALE));
+  const PH = Math.max(1, Math.round(MH * PROC_SCALE));
+  readCanvas.width  = PW;
+  readCanvas.height = PH;
+  allocBuffers(PW, PH);
+  state.smoothHulls = Array(N).fill(null); // coordinate space changed
+  return { PW, PH };
 }
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -300,7 +339,7 @@ function calibrateAt(clientX, clientY) {
   const py = Math.round((clientY - rect.top)  * scaleY);
 
   // sample a patch around the tap from the proc-res read canvas
-  readCtx.drawImage(video, 0, 0, readCanvas.width, readCanvas.height);
+  drawOriented(readCtx, readCanvas.width, readCanvas.height);
   const r  = 6;
   const x0 = Math.max(0, px - r), y0 = Math.max(0, py - r);
   const w  = Math.min(readCanvas.width  - x0, r * 2);
@@ -536,13 +575,13 @@ function processFrame() {
   const scaleX = MW / PW, scaleY = MH / PH;
   const count = PW * PH;
 
-  readCtx.drawImage(video, 0, 0, PW, PH);
+  drawOriented(readCtx, PW, PH);
   const img = readCtx.getImageData(0, 0, PW, PH).data;
 
   computeHSV(img, count);
 
-  // raw camera feed
-  mainCtx.drawImage(video, 0, 0, MW, MH);
+  // raw camera feed (same orientation as the proc buffer)
+  drawOriented(mainCtx, MW, MH);
 
   drawHistogram(count, MW);
 
@@ -863,7 +902,7 @@ function buildUI() {
 
 function getCalData() {
   return {
-    htol, stol, vtol, minArea,
+    htol, stol, vtol, minArea, rotation, mirror,
     pieces: state.calibrated.map((c, i) => c ? { ...c, name: PIECES[i].name } : null),
   };
 }
@@ -873,6 +912,10 @@ function applyCalData(data) {
   if (data.stol    !== undefined) { stol    = data.stol;    document.getElementById('stolRange').value  = stol;    document.getElementById('stolVal').textContent  = stol; }
   if (data.vtol    !== undefined) { vtol    = data.vtol;    document.getElementById('vtolRange').value  = vtol;    document.getElementById('vtolVal').textContent  = vtol; }
   if (data.minArea !== undefined) { minArea = data.minArea; document.getElementById('minAreaRange').value = minArea; document.getElementById('minAreaVal').textContent = minArea; }
+  if (data.rotation !== undefined) rotation = ((data.rotation % 360) + 360) % 360;
+  if (data.mirror   !== undefined) mirror   = !!data.mirror;
+  refreshOrientUI();
+  if (state.running) applyOrientation();
   if (Array.isArray(data.pieces)) {
     data.pieces.forEach((c, i) => {
       state.calibrated[i] = c ? { h: c.h, s: c.s, v: c.v } : null;
@@ -936,16 +979,7 @@ startBtn.onclick = async () => {
     video.srcObject = stream;
     await video.play();
 
-    const VW = video.videoWidth  || 640;
-    const VH = video.videoHeight || 480;
-    mainCanvas.width  = VW;
-    mainCanvas.height = VH;
-    const PW = Math.round(VW * PROC_SCALE);
-    const PH = Math.round(VH * PROC_SCALE);
-    readCanvas.width  = PW;
-    readCanvas.height = PH;
-
-    allocBuffers(PW, PH);
+    const { PW, PH } = applyOrientation();
 
     state.running = true;
     startBtn.style.display = 'none';
@@ -995,6 +1029,28 @@ const onFsChange = () => {
 };
 document.addEventListener('fullscreenchange', onFsChange);
 document.addEventListener('webkitfullscreenchange', onFsChange);
+
+// ── orientation: rotate / flip for the landscape-TV rig ─────────────────────
+
+const rotBtn  = document.getElementById('rotBtn');
+const flipBtn = document.getElementById('flipBtn');
+
+function refreshOrientUI() {
+  rotBtn.textContent = `⟳ ${rotation}°`;
+  flipBtn.classList.toggle('active', mirror);
+}
+
+rotBtn.onclick = () => {
+  rotation = (rotation + 90) % 360;
+  if (state.running) applyOrientation();   // swaps canvas dims + resets hulls
+  refreshOrientUI();
+};
+
+flipBtn.onclick = () => {
+  mirror = !mirror;                         // no realloc needed — draw-time only
+  state.smoothHulls = Array(N).fill(null);
+  refreshOrientUI();
+};
 
 buildUI();
 </script>
