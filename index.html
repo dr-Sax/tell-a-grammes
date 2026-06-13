@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Tangram Tracker</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -76,7 +76,7 @@ input[type=range] { accent-color: #4a90d9; }
 </head>
 <body>
 <div id="app">
-  <h1>Tangram color tracker — OpenCV.js</h1>
+  <h1>Tangram color tracker — pure JS (no OpenCV)</h1>
 
   <div id="canvasWrap">
     <canvas id="mainCanvas"></canvas>
@@ -84,13 +84,13 @@ input[type=range] { accent-color: #4a90d9; }
     <div id="crosshair"></div>
   </div>
 
-  <p id="cvStatus">Loading OpenCV.js…</p>
+  <p id="cvStatus">No external libraries — ready when you are.</p>
   <p id="status"></p>
   <button id="startBtn">Start camera</button>
 
   <div id="controls">
     <div class="ctrl-group">
-      <label>Hue tol <span id="htolVal">9</span>°</label>
+      <label>Hue tol <span id="htolVal">9</span></label>
       <input type="range" id="htolRange" min="4" max="45" value="9" style="flex:1">
     </div>
     <div class="ctrl-group">
@@ -122,12 +122,6 @@ input[type=range] { accent-color: #4a90d9; }
   <div id="ui"></div>
 </div>
 
-<script async src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.12.0-release.1/dist/opencv.min.js"
-  crossorigin="anonymous"
-  onload="onOpenCvReady()"
-  onerror="document.getElementById('cvStatus').textContent='OpenCV.js failed to load'">
-</script>
-
 <script>
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -146,26 +140,47 @@ const N = PIECES.length;
 const LERP = 0.3;
 // Hull resampled to this many vertices for stable lerping
 const HULL_VERTS = 20;
-// OpenCV processing scale (lower = faster, less precise)
+// Processing scale (lower = faster, less precise)
 const PROC_SCALE = 0.4;
+// Morphology radii (structuring element = (2r+1) square, separable)
+const OPEN_R  = 1;   // erode→dilate: removes speckle
+const CLOSE_R = 1;   // dilate→erode: bridges small gaps from glare
 
 // ── state ─────────────────────────────────────────────────────────────────────
 
 const state = {
-  cvReady: false,
   running: false,
   calibrating: -1,
-  // per piece: { h, s, v } mean from calibration tap
+  // per piece: { h (0-360), s (0-1), v (0-1) } mean from calibration tap
   calibrated: Array(N).fill(null),
   // smoothed hull polygon per piece [[x,y]…] in main canvas px
   smoothHulls: Array(N).fill(null),
-  frameCount: 0,
+  lastCounts: null,
 };
 
-let htol    = 9;    // hue tolerance in OpenCV HSV units (0-180)
-let stol    = 48;   // saturation tolerance (0-255 scale)
-let vtol    = 35;   // value tolerance (0-255 scale)
-let minArea = 250;  // minimum contour area in proc-scale pixels²
+let htol    = 9;    // hue tolerance, in OpenCV-style 0-180 units (×2 = degrees)
+let stol    = 48;   // saturation tolerance on 0-255 scale (÷255 = fraction)
+let vtol    = 35;   // value tolerance on 0-255 scale (÷255 = fraction)
+let minArea = 250;  // minimum blob area in proc-scale pixels
+
+// ── per-frame work buffers (allocated once camera starts) ───────────────────────
+
+let bufW = 0, bufH = 0;
+let Hc, Sc, Vc;            // per-pixel HSV  (Float32: H 0-360, S/V 0-1)
+let maskA, maskB, maskC;   // binary scratch masks (Uint8)
+let labels, labelStack;    // connected-components labels + flood-fill stack
+let committedBuf;          // pixels already claimed this frame (Uint8)
+let silMinX, silMaxX;      // per-row silhouette extents for the winning blob
+
+function allocBuffers(w, h) {
+  const n = w * h;
+  Hc = new Float32Array(n); Sc = new Float32Array(n); Vc = new Float32Array(n);
+  maskA = new Uint8Array(n); maskB = new Uint8Array(n); maskC = new Uint8Array(n);
+  labels = new Int32Array(n); labelStack = new Int32Array(n);
+  committedBuf = new Uint8Array(n);
+  silMinX = new Int32Array(h); silMaxX = new Int32Array(h);
+  bufW = w; bufH = h;
+}
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -182,7 +197,7 @@ const debugBar    = document.getElementById('debugBar');
 const histCanvas  = document.getElementById('histCanvas');
 const histCtx     = histCanvas.getContext('2d');
 
-// hidden canvas for reading camera pixels at full res
+// hidden canvas for reading camera pixels at proc res
 const readCanvas  = document.createElement('canvas');
 const readCtx     = readCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -210,13 +225,6 @@ document.getElementById('minAreaRange').oninput = e => {
 
 // ── colour helpers ────────────────────────────────────────────────────────────
 
-function hexToRgb(hex) {
-  const r = parseInt(hex.slice(1,3),16);
-  const g = parseInt(hex.slice(3,5),16);
-  const b = parseInt(hex.slice(5,7),16);
-  return [r, g, b];
-}
-
 // Standard RGB→HSV, returns h 0-360, s 0-1, v 0-1
 function rgb2hsv(r, g, b) {
   r /= 255; g /= 255; b /= 255;
@@ -231,11 +239,6 @@ function rgb2hsv(r, g, b) {
   return [h, max > 0 ? d / max : 0, max];
 }
 
-// OpenCV HSV: H 0-180, S 0-255, V 0-255
-function toOcvHSV(h360, s01, v01) {
-  return [Math.round(h360 / 2), Math.round(s01 * 255), Math.round(v01 * 255)];
-}
-
 function hsvToHex(h360, s01, v01) {
   const h = h360, s = s01, v = v01;
   const f = n => {
@@ -244,6 +247,12 @@ function hsvToHex(h360, s01, v01) {
   };
   const r = f(5), g = f(3), b = f(1);
   return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+// circular hue distance in degrees (0-180)
+function hueDiff360(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
 }
 
 // ── calibration tap ───────────────────────────────────────────────────────────
@@ -255,20 +264,21 @@ mainCanvas.addEventListener('mousemove', e => {
   crosshair.style.top  = (e.clientY - rect.top)  + 'px';
 });
 
-mainCanvas.addEventListener('click', e => {
+function calibrateAt(clientX, clientY) {
   if (state.calibrating < 0 || !state.running) return;
   const rect  = mainCanvas.getBoundingClientRect();
   const scaleX = readCanvas.width  / rect.width;
   const scaleY = readCanvas.height / rect.height;
-  const px = Math.round((e.clientX - rect.left) * scaleX);
-  const py = Math.round((e.clientY - rect.top)  * scaleY);
+  const px = Math.round((clientX - rect.left) * scaleX);
+  const py = Math.round((clientY - rect.top)  * scaleY);
 
-  // sample a 24×24 patch from the full-res read canvas
+  // sample a patch around the tap from the proc-res read canvas
   readCtx.drawImage(video, 0, 0, readCanvas.width, readCanvas.height);
-  const r  = 12;
+  const r  = 6;
   const x0 = Math.max(0, px - r), y0 = Math.max(0, py - r);
   const w  = Math.min(readCanvas.width  - x0, r * 2);
   const h  = Math.min(readCanvas.height - y0, r * 2);
+  if (w <= 0 || h <= 0) { statusEl.textContent = 'Tap inside the frame'; return; }
   const data = readCtx.getImageData(x0, y0, w, h).data;
 
   let hs = 0, ss = 0, vs = 0, n = 0;
@@ -288,12 +298,20 @@ mainCanvas.addEventListener('click', e => {
   tapHint.style.display = 'none';
   crosshair.style.display = 'none';
   buildUI();
-});
+}
+
+mainCanvas.addEventListener('click', e => calibrateAt(e.clientX, e.clientY));
+// touch: tap to calibrate without firing a synthetic mouse scroll
+mainCanvas.addEventListener('touchend', e => {
+  if (state.calibrating < 0) return;
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  if (t) calibrateAt(t.clientX, t.clientY);
+}, { passive: false });
 
 // ── hull smoothing ────────────────────────────────────────────────────────────
 
 function resamplePoly(pts, n) {
-  // pts: [[x,y]…], returns n evenly-spaced points around the polygon
   if (pts.length === 0) return [];
   if (pts.length === n) return pts;
   const out = [];
@@ -318,156 +336,206 @@ function lerpPoly(prev, next) {
   ]);
 }
 
-// ── OpenCV processing ─────────────────────────────────────────────────────────
-
-let src, hsv, mask, committed, kernel, contours, hierarchy;
-
-function allocOcvMats(w, h) {
-  [src, hsv, mask, committed, kernel, contours, hierarchy].forEach(m => {
-    try { if (m) m.delete(); } catch(e) {}
-  });
-  src       = new cv.Mat(h, w, cv.CV_8UC4);
-  hsv       = new cv.Mat(h, w, cv.CV_8UC3);
-  mask      = new cv.Mat(h, w, cv.CV_8UC1);
-  committed = new cv.Mat(h, w, cv.CV_8UC1); // union of all claimed pixels so far
-  kernel    = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
-  contours  = new cv.MatVector();
-  hierarchy = new cv.Mat();
+// Andrew's monotone-chain convex hull. pts: [[x,y]…] → hull [[x,y]…] CCW
+function convexHull(pts) {
+  if (pts.length < 3) return pts.slice();
+  pts = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 &&
+           cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 &&
+           cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
 }
 
+// ── per-pixel HSV for the whole frame ───────────────────────────────────────────
+
+function computeHSV(img, count) {
+  for (let p = 0, q = 0; p < count; p++, q += 4) {
+    const r = img[q] / 255, g = img[q+1] / 255, b = img[q+2] / 255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max - min;
+    let h = 0;
+    if (d > 0) {
+      if      (max === r) h = ((g - b) / d + 6) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else                h = (r - g) / d + 4;
+      h *= 60;
+    }
+    Hc[p] = h;
+    Sc[p] = max > 0 ? d / max : 0;
+    Vc[p] = max;
+  }
+}
+
+// build a binary mask of pixels matching `cal`, excluding already-committed pixels
+function buildMask(cal, mask, count) {
+  const ch = cal.h, cs = cal.s, cvv = cal.v;
+  const hT = htol * 2;     // degrees
+  const sT = stol / 255;   // fraction
+  const vT = vtol / 255;   // fraction
+  for (let p = 0; p < count; p++) {
+    if (committedBuf[p]) { mask[p] = 0; continue; }
+    let dh = Math.abs(Hc[p] - ch) % 360; if (dh > 180) dh = 360 - dh;
+    mask[p] = (dh <= hT &&
+               Math.abs(Sc[p] - cs) <= sT &&
+               Math.abs(Vc[p] - cvv) <= vT) ? 1 : 0;
+  }
+}
+
+// ── morphology (separable binary erode/dilate, square SE) ────────────────────────
+
+// horiz pass into tmp, vert pass into dst. erode = AND over window, dilate = OR.
+function morphPass(src, dst, tmp, w, h, r, erode) {
+  for (let y = 0; y < h; y++) {
+    const off = y * w;
+    for (let x = 0; x < w; x++) {
+      let acc = erode ? 1 : 0;
+      for (let dx = -r; dx <= r; dx++) {
+        const xx = x + dx;
+        const v = (xx < 0 || xx >= w) ? 0 : src[off + xx];
+        if (erode) { if (!v) { acc = 0; break; } }
+        else       { if (v)  { acc = 1; break; } }
+      }
+      tmp[off + x] = acc;
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      let acc = erode ? 1 : 0;
+      for (let dy = -r; dy <= r; dy++) {
+        const yy = y + dy;
+        const v = (yy < 0 || yy >= h) ? 0 : tmp[yy * w + x];
+        if (erode) { if (!v) { acc = 0; break; } }
+        else       { if (v)  { acc = 1; break; } }
+      }
+      dst[y * w + x] = acc;
+    }
+  }
+}
+
+// open/close operate on maskA, using maskB & maskC as scratch, result back in maskA
+function morphOpen(w, h, r) {
+  if (r <= 0) return;
+  morphPass(maskA, maskB, maskC, w, h, r, true);   // erode → maskB
+  morphPass(maskB, maskA, maskC, w, h, r, false);  // dilate → maskA
+}
+function morphClose(w, h, r) {
+  if (r <= 0) return;
+  morphPass(maskA, maskB, maskC, w, h, r, false);  // dilate → maskB
+  morphPass(maskB, maskA, maskC, w, h, r, true);   // erode → maskA
+}
+
+// ── connected components: label everything, return largest blob's label/area ─────
+
+function largestBlob(mask, w, h, minA) {
+  const n = w * h;
+  labels.fill(0);
+  let cur = 0, bestLabel = 0, bestArea = minA; // strictly greater than minArea
+  for (let s = 0; s < n; s++) {
+    if (!mask[s] || labels[s]) continue;
+    cur++;
+    let sp = 0;
+    labelStack[sp++] = s;
+    labels[s] = cur;
+    let area = 0;
+    while (sp > 0) {
+      const idx = labelStack[--sp];
+      area++;
+      const x = idx % w, y = (idx / w) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy; if (ny < 0 || ny >= h) continue;
+        const nrow = ny * w;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx; if (nx < 0 || nx >= w) continue;
+          const nidx = nrow + nx;
+          if (mask[nidx] && !labels[nidx]) { labels[nidx] = cur; labelStack[sp++] = nidx; }
+        }
+      }
+    }
+    if (area > bestArea) { bestArea = area; bestLabel = cur; }
+  }
+  return bestLabel ? { label: bestLabel, area: bestArea } : null;
+}
+
+// for the winning label: mark committed pixels and collect per-row silhouette points
+function silhouetteAndCommit(label, w, h) {
+  for (let y = 0; y < h; y++) { silMinX[y] = 1e9; silMaxX[y] = -1; }
+  for (let y = 0; y < h; y++) {
+    const off = y * w;
+    for (let x = 0; x < w; x++) {
+      const idx = off + x;
+      if (labels[idx] === label) {
+        committedBuf[idx] = 1;
+        if (x < silMinX[y]) silMinX[y] = x;
+        if (x > silMaxX[y]) silMaxX[y] = x;
+      }
+    }
+  }
+  const pts = [];
+  for (let y = 0; y < h; y++) {
+    if (silMaxX[y] >= 0) {
+      pts.push([silMinX[y], y]);
+      if (silMaxX[y] !== silMinX[y]) pts.push([silMaxX[y], y]);
+    }
+  }
+  return pts;
+}
+
+// ── main loop ────────────────────────────────────────────────────────────────
+
 function processFrame() {
-  if (!state.running || !state.cvReady) return;
+  if (!state.running) return;
 
-  const PW = Math.round(video.videoWidth  * PROC_SCALE);
-  const PH = Math.round(video.videoHeight * PROC_SCALE);
-  const MW = mainCanvas.width;
-  const MH = mainCanvas.height;
-  const scaleX = MW / PW;
-  const scaleY = MH / PH;
+  const PW = readCanvas.width, PH = readCanvas.height;
+  const MW = mainCanvas.width, MH = mainCanvas.height;
+  const scaleX = MW / PW, scaleY = MH / PH;
+  const count = PW * PH;
 
-  // draw video to read canvas (proc size) and grab pixels
   readCtx.drawImage(video, 0, 0, PW, PH);
-  const imgData = readCtx.getImageData(0, 0, PW, PH);
+  const img = readCtx.getImageData(0, 0, PW, PH).data;
 
-  // load into OpenCV src mat
-  src.cols = PW; src.rows = PH;
-  src.data.set(imgData.data);
+  computeHSV(img, count);
 
-  // convert RGBA→RGB→HSV
-  cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
-  cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
-
-  // draw raw camera feed to main canvas
+  // raw camera feed
   mainCtx.drawImage(video, 0, 0, MW, MH);
 
-  // hue histogram from HSV mat
-  drawHistogram(hsv, PW, PH, MW);
+  drawHistogram(count, MW);
 
   const counts = Array(N).fill(0);
+  committedBuf.fill(0);
 
-  // reset committed mask each frame
-  committed.setTo(new cv.Scalar(0));
-
-  // sort calibrated pieces by descending calibrated area from last frame
-  // so larger/more certain pieces claim pixels first
-  const order = Array.from({length: N}, (_,i) => i)
+  // larger / more certain pieces (by last frame area) claim pixels first
+  const order = Array.from({length: N}, (_, i) => i)
     .filter(i => state.calibrated[i])
     .sort((a, b) => (state.lastCounts?.[b] || 0) - (state.lastCounts?.[a] || 0));
 
   for (const i of order) {
-    const cal = state.calibrated[i];
-    const [oh, os, ov] = toOcvHSV(cal.h, cal.s, cal.v);
+    buildMask(state.calibrated[i], maskA, count);
+    morphOpen(PW, PH, OPEN_R);
+    morphClose(PW, PH, CLOSE_R);
 
-    const hLo = Math.max(0,   oh - htol);
-    const hHi = Math.min(180, oh + htol);
-    const sLo = Math.max(0,   os - stol);
-    const sHi = Math.min(255, os + stol);
-    const vLo = Math.max(0,   ov - vtol);
-    const vHi = Math.min(255, ov + vtol);
+    const blob = largestBlob(maskA, PW, PH, minArea);
+    counts[i] = blob ? Math.round(blob.area) : 0;
 
-    const lo = new cv.Mat(1, 3, cv.CV_8UC1);
-    const hi = new cv.Mat(1, 3, cv.CV_8UC1);
-    lo.data[0] = hLo; lo.data[1] = sLo; lo.data[2] = vLo;
-    hi.data[0] = hHi; hi.data[1] = sHi; hi.data[2] = vHi;
-    cv.inRange(hsv, lo, hi, mask);
-    lo.delete(); hi.delete();
+    if (!blob) { state.smoothHulls[i] = null; continue; }
 
-    // hue wrap for red (near 0° or 180°)
-    if (oh < htol) {
-      const lo2 = new cv.Mat(1,3,cv.CV_8UC1);
-      const hi2 = new cv.Mat(1,3,cv.CV_8UC1);
-      const mask2 = new cv.Mat();
-      lo2.data[0]=0; lo2.data[1]=sLo; lo2.data[2]=vLo;
-      hi2.data[0]=oh+htol; hi2.data[1]=sHi; hi2.data[2]=vHi;
-      cv.inRange(hsv, lo2, hi2, mask2);
-      cv.bitwise_or(mask, mask2, mask);
-      lo2.delete(); hi2.delete(); mask2.delete();
-    }
-    if (oh > 180 - htol) {
-      const lo2 = new cv.Mat(1,3,cv.CV_8UC1);
-      const hi2 = new cv.Mat(1,3,cv.CV_8UC1);
-      const mask2 = new cv.Mat();
-      lo2.data[0]=oh-htol; lo2.data[1]=sLo; lo2.data[2]=vLo;
-      hi2.data[0]=180;     hi2.data[1]=sHi; hi2.data[2]=vHi;
-      cv.inRange(hsv, lo2, hi2, mask2);
-      cv.bitwise_or(mask, mask2, mask);
-      lo2.delete(); hi2.delete(); mask2.delete();
-    }
+    const sil = silhouetteAndCommit(blob.label, PW, PH);
+    let hull = convexHull(sil);
+    hull = hull.map(p => [p[0] * scaleX, p[1] * scaleY]);
 
-    // ── subtract pixels already claimed by earlier pieces ──
-    // invert committed mask and AND with current mask
-    const notCommitted = new cv.Mat();
-    cv.bitwise_not(committed, notCommitted);
-    cv.bitwise_and(mask, notCommitted, mask);
-    notCommitted.delete();
-
-    // morphological clean
-    cv.morphologyEx(mask, mask, cv.MORPH_OPEN,  kernel);
-    cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
-
-    // find contours
-    contours.delete(); hierarchy.delete();
-    contours  = new cv.MatVector();
-    hierarchy = new cv.Mat();
-    cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-    // pick largest contour above minArea
-    let bestIdx = -1, bestArea = minArea;
-    for (let c = 0; c < contours.size(); c++) {
-      const area = cv.contourArea(contours.get(c));
-      if (area > bestArea) { bestArea = area; bestIdx = c; }
-    }
-
-    counts[i] = bestIdx >= 0 ? Math.round(bestArea) : 0;
-
-    if (bestIdx < 0) {
-      state.smoothHulls[i] = null;
-      continue;
-    }
-
-    // add winning contour pixels to committed mask so subsequent pieces can't claim them
-    const winMask = new cv.Mat.zeros(PH, PW, cv.CV_8UC1);
-    const vec = new cv.MatVector();
-    vec.push_back(contours.get(bestIdx));
-    cv.drawContours(winMask, vec, 0, new cv.Scalar(255), -1); // filled
-    cv.bitwise_or(committed, winMask, committed);
-    winMask.delete(); vec.delete();
-
-    // convex hull of best contour
-    const cnt  = contours.get(bestIdx);
-    const hull = new cv.Mat();
-    cv.convexHull(cnt, hull, false, true);
-
-    const pts = [];
-    for (let p = 0; p < hull.rows; p++) {
-      pts.push([
-        hull.data32S[p * 2]     * scaleX,
-        hull.data32S[p * 2 + 1] * scaleY,
-      ]);
-    }
-    hull.delete();
-
-    const resampled = resamplePoly(pts, HULL_VERTS);
+    const resampled = resamplePoly(hull, HULL_VERTS);
     state.smoothHulls[i] = lerpPoly(state.smoothHulls[i], resampled);
 
     drawOverlay(state.smoothHulls[i], i, MW, MH);
@@ -475,20 +543,19 @@ function processFrame() {
 
   state.lastCounts = counts;
 
-  // debug badges
   debugBar.innerHTML = Array.from({length:N}, (_,i) => i).map(i => {
     if (!state.calibrated[i]) return '';
     const c = counts[i];
     const col = hsvToHex(state.calibrated[i].h, state.calibrated[i].s, state.calibrated[i].v);
     return c > 0
-      ? `<span class="dbadge" style="background:${col}22;color:${col};border:1px solid ${col}88">${PIECES[i].name} ${c}px²</span>`
+      ? `<span class="dbadge" style="background:${col}22;color:${col};border:1px solid ${col}88">${PIECES[i].name} ${c}px</span>`
       : `<span class="dbadge" style="color:#444;border:1px solid #222">${PIECES[i].name} —</span>`;
   }).join('');
 
   requestAnimationFrame(processFrame);
 }
 
-// per piece: { type: 'image'|'video', el: HTMLImageElement|HTMLVideoElement } or null
+// per piece: { type: 'image'|'video', el, url, name } or null
 const pieceMedia = Array(N).fill(null);
 
 function drawOverlay(hull, i, MW, MH) {
@@ -505,7 +572,6 @@ function drawOverlay(hull, i, MW, MH) {
 
   const media = pieceMedia[i];
   if (media && (media.type === 'image' || (media.type === 'video' && !media.el.paused))) {
-    // fit media into hull bounding box, preserving aspect ratio
     const xs = hull.map(p => p[0]), ys = hull.map(p => p[1]);
     const bx = Math.min(...xs), by = Math.min(...ys);
     const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
@@ -518,7 +584,6 @@ function drawOverlay(hull, i, MW, MH) {
     mainCtx.drawImage(media.el, dx, dy, dw, dh);
     mainCtx.globalAlpha = 1;
   } else {
-    // fallback: semi-transparent color fill
     mainCtx.globalAlpha = 0.45;
     mainCtx.fillStyle = color;
     mainCtx.fillRect(0, 0, MW, MH);
@@ -527,7 +592,6 @@ function drawOverlay(hull, i, MW, MH) {
 
   mainCtx.restore();
 
-  // outline
   mainCtx.save();
   mainCtx.strokeStyle = color;
   mainCtx.lineWidth = 2;
@@ -541,15 +605,15 @@ function drawOverlay(hull, i, MW, MH) {
 
 // ── hue histogram ─────────────────────────────────────────────────────────────
 
-function drawHistogram(hsvMat, PW, PH, MW) {
-  const BINS = 90; // 2° per bin
+function drawHistogram(count, MW) {
+  const BINS = 90;            // 4° per bin across 0-360
   const buckets = new Uint32Array(BINS);
-  const data = hsvMat.data; // U8, 3 channels: H S V
 
-  for (let i = 0; i < data.length; i += 3) {
-    const h = data[i], s = data[i+1], v = data[i+2];
-    if (s > 50 && v > 40) {
-      buckets[Math.min(BINS-1, Math.floor(h / 2))]++;
+  for (let p = 0; p < count; p++) {
+    if (Sc[p] > 0.196 && Vc[p] > 0.157) {   // s>~50/255, v>~40/255
+      let b = (Hc[p] / 4) | 0;
+      if (b < 0) b = 0; else if (b >= BINS) b = BINS - 1;
+      buckets[b]++;
     }
   }
 
@@ -563,12 +627,11 @@ function drawHistogram(hsvMat, PW, PH, MW) {
   const barW = HW / BINS;
   for (let b = 0; b < BINS; b++) {
     const bh = (buckets[b] / maxB) * (HH - 4);
-    const hue = b * 2; // degrees
+    const hue = b * 4; // degrees
     histCtx.fillStyle = `hsl(${hue},85%,52%)`;
     histCtx.fillRect(b * barW, HH - bh, barW - 0.5, bh);
   }
 
-  // calibrated piece tick marks
   for (let i = 0; i < N; i++) {
     if (!state.calibrated[i]) continue;
     const xPos = (state.calibrated[i].h / 360) * HW;
@@ -586,11 +649,6 @@ function drawHistogram(hsvMat, PW, PH, MW) {
 
 // ── UI ────────────────────────────────────────────────────────────────────────
 
-function hueDiff360(a, b) {
-  const d = Math.abs(a - b) % 360;
-  return d > 180 ? 360 - d : d;
-}
-
 function conflictsWith(i) {
   const cal = state.calibrated[i];
   if (!cal) return null;
@@ -607,7 +665,6 @@ function buildUI() {
     const row = document.createElement('div');
     row.className = 'piece-row';
 
-    // ── top line: swatch, name, stats, calibrate, clear ──
     const main = document.createElement('div');
     main.className = 'piece-main';
 
@@ -659,7 +716,6 @@ function buildUI() {
 
     main.append(sw, lbl, stats, calBtn, clrBtn);
 
-    // ── media row: thumb, upload btn, clear ──
     const mediaRow = document.createElement('div');
     mediaRow.className = 'piece-media';
 
@@ -670,7 +726,6 @@ function buildUI() {
       if (pieceMedia[i].type === 'image') {
         thumb.src = pieceMedia[i].el.src;
       } else {
-        // video — draw first frame to a temp canvas for thumbnail
         const tc = document.createElement('canvas');
         tc.width = 40; tc.height = 28;
         try { tc.getContext('2d').drawImage(pieceMedia[i].el, 0, 0, 40, 28); } catch(e){}
@@ -682,11 +737,9 @@ function buildUI() {
     nameEl.className = 'media-name';
     nameEl.textContent = pieceMedia[i] ? pieceMedia[i].name : 'no media';
 
-    // hidden file input — accepts image + video, triggers camera roll on mobile
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = 'image/*,video/*';
-    fileInput.capture = ''; // don't force camera; lets user choose file or camera
     fileInput.style.display = 'none';
     fileInput.onchange = e => {
       const file = e.target.files[0];
@@ -819,83 +872,27 @@ startBtn.onclick = async () => {
     const VH = video.videoHeight || 480;
     mainCanvas.width  = VW;
     mainCanvas.height = VH;
-    readCanvas.width  = Math.round(VW * PROC_SCALE);
-    readCanvas.height = Math.round(VH * PROC_SCALE);
+    const PW = Math.round(VW * PROC_SCALE);
+    const PH = Math.round(VH * PROC_SCALE);
+    readCanvas.width  = PW;
+    readCanvas.height = PH;
+
+    allocBuffers(PW, PH);
 
     state.running = true;
     startBtn.style.display = 'none';
     controlsEl.style.display = 'flex';
     document.getElementById('calControls').style.display = 'flex';
+    cvStatusEl.textContent = `Running at ${PW}×${PH} proc res — pure JS`;
+    statusEl.textContent = 'Tap "calibrate" then tap a piece in the frame';
     buildUI();
-
-    if (state.cvReady) {
-      // OpenCV already loaded — start tracking immediately
-      allocOcvMats(readCanvas.width, readCanvas.height);
-      statusEl.textContent = 'Running — tap "calibrate" then tap a piece in the frame';
-      processFrame();
-    } else {
-      // Camera is live but OpenCV still loading — show preview, wait for cv
-      statusEl.textContent = 'Camera ready — waiting for OpenCV to finish loading…';
-      state.pendingStart = true;
-      previewLoop();
-    }
+    processFrame();
   } catch(e) {
-    statusEl.textContent = 'Camera error: ' + e.message;
+    statusEl.textContent = 'Camera error: ' + e.message +
+      (location.protocol !== 'https:' && location.hostname !== 'localhost'
+        ? ' — iOS requires HTTPS for camera access.' : '');
   }
 };
-
-// Raw camera preview loop used before OpenCV is ready
-function previewLoop() {
-  if (!state.running) return;
-  mainCtx.drawImage(video, 0, 0, mainCanvas.width, mainCanvas.height);
-  if (state.cvReady) {
-    // OpenCV became ready — hand off to full processing loop
-    allocOcvMats(readCanvas.width, readCanvas.height);
-    statusEl.textContent = 'OpenCV ready — tap "calibrate" then tap a piece in the frame';
-    state.pendingStart = false;
-    processFrame();
-    return;
-  }
-  requestAnimationFrame(previewLoop);
-}
-
-// ── OpenCV ready callback ─────────────────────────────────────────────────────
-
-function onOpenCvLoadError() {
-  cvStatusEl.textContent = 'CDN load failed — check connection and reload';
-}
-
-function onOpenCvReady() {
-  // The script onload fires when JS is parsed, but WASM binary still
-  // needs to compile. Use onRuntimeInitialized for the real ready signal.
-  const tryInit = () => {
-    if (typeof cv === 'undefined') { setTimeout(tryInit, 200); return; }
-
-    // cv may be a promise (some builds) or an object
-    Promise.resolve(typeof cv.then === 'function' ? cv : null).then(() => {
-      // Now hook onRuntimeInitialized — if Mat already exists, it's done
-      if (cv.Mat) {
-        markCvReady();
-      } else {
-        cv.onRuntimeInitialized = markCvReady;
-        // Safety timeout: if WASM never fires, report the error
-        setTimeout(() => {
-          if (!state.cvReady) {
-            cvStatusEl.textContent = 'OpenCV WASM timed out — try reloading on WiFi';
-          }
-        }, 30000);
-      }
-    });
-  };
-  tryInit();
-}
-
-function markCvReady() {
-  if (state.cvReady) return;
-  state.cvReady = true;
-  cvStatusEl.textContent = 'OpenCV.js ready';
-  // If camera was started before cv was ready, previewLoop will hand off automatically
-}
 
 buildUI();
 </script>
