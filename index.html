@@ -309,6 +309,12 @@ mainCanvas.addEventListener('touchend', e => {
   if (t) calibrateAt(t.clientX, t.clientY);
 }, { passive: false });
 
+// resume any autoplay-blocked piece videos on a canvas tap (iOS safety net)
+mainCanvas.addEventListener('pointerdown', () => {
+  if (state.calibrating >= 0) return;
+  for (const m of pieceMedia) if (m && m.type === 'video' && m.el.paused) m.el.play().catch(()=>{});
+});
+
 // ── hull smoothing ────────────────────────────────────────────────────────────
 
 function resamplePoly(pts, n) {
@@ -558,6 +564,14 @@ function processFrame() {
 // per piece: { type: 'image'|'video', el, url, name } or null
 const pieceMedia = Array(N).fill(null);
 
+function disposeMedia(i) {
+  const m = pieceMedia[i];
+  if (!m) return;
+  URL.revokeObjectURL(m.url);
+  if (m.type === 'video') { try { m.el.pause(); m.el.remove(); } catch(e){} }
+  pieceMedia[i] = null;
+}
+
 function drawOverlay(hull, i, MW, MH) {
   if (!hull || hull.length < 3) return;
   const cal = state.calibrated[i];
@@ -745,27 +759,44 @@ function buildUI() {
       const file = e.target.files[0];
       if (!file) return;
       const url = URL.createObjectURL(file);
-      if (file.type.startsWith('image/')) {
-        const img = new Image();
-        img.onload = () => {
-          if (pieceMedia[i]) URL.revokeObjectURL(pieceMedia[i].url);
-          pieceMedia[i] = { type: 'image', el: img, url, name: file.name };
-          buildUI();
-        };
-        img.src = url;
-      } else if (file.type.startsWith('video/')) {
+
+      // iOS Photos/Files often report an empty or odd file.type — decide by
+      // extension too, and default everything else to image.
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const isVideo = file.type.startsWith('video/') ||
+                      ['mov','mp4','m4v','webm','ogv','3gp','avi'].includes(ext);
+
+      const setMedia = (type, el) => {
+        disposeMedia(i);
+        pieceMedia[i] = { type, el, url, name: file.name };
+        statusEl.textContent = `${PIECES[i].name}: ${type} attached`;
+        buildUI();
+      };
+
+      if (isVideo) {
         const vid = document.createElement('video');
         vid.src = url;
-        vid.loop = true;
-        vid.muted = true;
-        vid.playsInline = true;
-        vid.autoplay = true;
-        vid.onloadeddata = () => {
-          vid.play();
-          if (pieceMedia[i]) URL.revokeObjectURL(pieceMedia[i].url);
-          pieceMedia[i] = { type: 'video', el: vid, url, name: file.name };
-          buildUI();
+        vid.loop = true; vid.muted = true; vid.playsInline = true;
+        vid.setAttribute('playsinline', '');
+        vid.setAttribute('webkit-playsinline', '');
+        // iOS won't decode frames from a detached video — keep it in the DOM,
+        // on-screen but effectively invisible.
+        vid.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+        document.body.appendChild(vid);
+        const start = () => vid.play().then(() => setMedia('video', vid))
+          .catch(() => { setMedia('video', vid);
+            statusEl.textContent = `${PIECES[i].name}: tap the video area once to start playback`; });
+        if (vid.readyState >= 2) start();
+        else vid.addEventListener('loadeddata', start, { once: true });
+        vid.onerror = () => { statusEl.textContent = 'Could not load that video'; URL.revokeObjectURL(url); };
+      } else {
+        const img = new Image();
+        img.onload  = () => setMedia('image', img);
+        img.onerror = () => {
+          statusEl.textContent = 'Could not decode image — if it’s HEIC, set iOS Camera → Formats to “Most Compatible”, or use a JPG/PNG';
+          URL.revokeObjectURL(url);
         };
+        img.src = url;
       }
       e.target.value = '';
     };
@@ -780,8 +811,7 @@ function buildUI() {
     clrMediaBtn.textContent = '✕';
     clrMediaBtn.disabled = !pieceMedia[i];
     clrMediaBtn.onclick = () => {
-      if (pieceMedia[i]) URL.revokeObjectURL(pieceMedia[i].url);
-      pieceMedia[i] = null;
+      disposeMedia(i);
       buildUI();
     };
 
