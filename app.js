@@ -40,6 +40,7 @@ let minArea = 250;  // minimum blob area in proc-scale pixels
 
 let rotation = 0;   // display/capture rotation: 0 | 90 | 180 | 270
 let mirror   = false; // horizontal flip
+let showFeed = true;  // draw the camera feed, or a white lightbox, behind overlays
 
 // ── per-frame work buffers (allocated once camera starts) ───────────────────────
 
@@ -420,8 +421,14 @@ function processFrame() {
 
   computeHSV(img, count);
 
-  // raw camera feed (same orientation as the proc buffer)
-  drawOriented(mainCtx, MW, MH);
+  // background: live camera feed, or a white lightbox to illuminate the pieces.
+  // (Tracking always reads the proc buffer above, so detection is unaffected.)
+  if (showFeed) {
+    drawOriented(mainCtx, MW, MH);
+  } else {
+    mainCtx.fillStyle = '#fff';
+    mainCtx.fillRect(0, 0, MW, MH);
+  }
 
   const counts = Array(N).fill(0);
   committedBuf.fill(0);
@@ -844,6 +851,13 @@ flipBtn.onclick = () => {
   mirror = !mirror;                         // no realloc needed — draw-time only
   state.smoothHulls = Array(N).fill(null);
   refreshOrientUI();
+};
+
+const feedBtn = document.getElementById('feedBtn');
+feedBtn.onclick = () => {
+  showFeed = !showFeed;
+  feedBtn.textContent = showFeed ? '📷 feed on' : '⬜ feed off';
+  feedBtn.classList.toggle('active', !showFeed);
 };
 
 buildUI();
