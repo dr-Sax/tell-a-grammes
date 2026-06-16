@@ -1,26 +1,31 @@
 // ── config ────────────────────────────────────────────────────────────────────
-document.addEventListener('pointerdown', (e) => {
-  const s = document.getElementById('status');
-  if (s) s.textContent = 'TAP → ' + (e.target.id || e.target.tagName);
-}, true);
 
 const PIECES = [
-  { name: 'Piece 1', color: '#e05555' },
-  { name: 'Piece 2', color: '#e09055' },
-  { name: 'Piece 3', color: '#d4c820' },
-  { name: 'Piece 4', color: '#44b844' },
-  { name: 'Piece 5', color: '#2299cc' },
-  { name: 'Piece 6', color: '#7755dd' },
-  { name: 'Piece 7', color: '#cc44aa' },
+  // shape: 'triangle' | 'square' | 'parallelogram'  (cycle it live via the UI)
+  // defaults below are a classic tangram set: 5 triangles, 1 square, 1 parallelogram
+  { name: 'Piece 1', color: '#e05555', shape: 'triangle' },
+  { name: 'Piece 2', color: '#e09055', shape: 'triangle' },
+  { name: 'Piece 3', color: '#d4c820', shape: 'triangle' },
+  { name: 'Piece 4', color: '#44b844', shape: 'triangle' },
+  { name: 'Piece 5', color: '#2299cc', shape: 'triangle' },
+  { name: 'Piece 6', color: '#7755dd', shape: 'square' },
+  { name: 'Piece 7', color: '#cc44aa', shape: 'parallelogram' },
 ];
 const N = PIECES.length;
+
+// how many corners to fit per shape, and the glyph shown on the UI toggle
+const SHAPE_VERTS = { triangle: 3, square: 4, parallelogram: 4 };
+const SHAPE_ICON  = { triangle: '△', square: '□', parallelogram: '▱' };
+const SHAPE_ORDER = ['triangle', 'square', 'parallelogram'];
 
 // Smoothing: lerp factor for hull vertices each frame
 const LERP = 0.3;
 // Hull resampled to this many vertices for stable lerping
 const HULL_VERTS = 20;
-// Processing scale (lower = faster, less precise)
-const PROC_SCALE = 0.4;
+// Tracking runs at roughly this width in px, regardless of capture resolution.
+// This decouples display sharpness (capture res) from tracking cost — bump the
+// camera to 1280x720 for a crisp feed without making detection any slower.
+const PROC_TARGET_W = 320;
 // Morphology radii (structuring element = (2r+1) square, separable)
 const OPEN_R  = 1;   // erode→dilate: removes speckle
 const CLOSE_R = 1;   // dilate→erode: bridges small gaps from glare
@@ -87,8 +92,9 @@ function applyOrientation() {
   const MH = swap ? VW : VH;
   mainCanvas.width  = MW;
   mainCanvas.height = MH;
-  const PW = Math.max(1, Math.round(MW * PROC_SCALE));
-  const PH = Math.max(1, Math.round(MH * PROC_SCALE));
+  const procScale = Math.min(1, PROC_TARGET_W / MW);
+  const PW = Math.max(1, Math.round(MW * procScale));
+  const PH = Math.max(1, Math.round(MH * procScale));
   readCanvas.width  = PW;
   readCanvas.height = PH;
   allocBuffers(PW, PH);
@@ -276,6 +282,74 @@ function convexHull(pts) {
   return lower.concat(upper);
 }
 
+// ── shape fitting ────────────────────────────────────────────────────────────
+// We already know each piece's geometry, so rather than trace a wobbly 20-point
+// free-form hull every frame, collapse the blob to its k corners (3 = triangle,
+// 4 = quad) and smooth just those few points — with a stable correspondence so
+// corners don't swap identities between frames.
+
+// Greedy max-area k-gon chosen from the convex-hull vertices. Returns the chosen
+// vertices in hull (CCW) order, so the result is always a simple convex polygon.
+function kgonFromHull(hull, k) {
+  const m = hull.length;
+  if (m <= k) return hull.map(p => p.slice());
+  const tri2 = (a, b, c) =>
+    Math.abs((b[0]-a[0])*(c[1]-a[1]) - (c[0]-a[0])*(b[1]-a[1]));
+  // seed with the two farthest-apart vertices (the polygon's diameter)
+  let bi = 0, bj = 1, bd = -1;
+  for (let i = 0; i < m; i++)
+    for (let j = i + 1; j < m; j++) {
+      const dx = hull[i][0] - hull[j][0], dy = hull[i][1] - hull[j][1];
+      const d = dx*dx + dy*dy;
+      if (d > bd) { bd = d; bi = i; bj = j; }
+    }
+  const idx = [bi, bj];
+  while (idx.length < k) {
+    let best = -1, bestGain = -1;
+    for (let v = 0; v < m; v++) {
+      if (idx.indexOf(v) !== -1) continue;
+      let gain = 0;
+      for (let e = 0; e < idx.length; e++) {
+        const a = hull[idx[e]], b = hull[idx[(e + 1) % idx.length]];
+        const g = tri2(a, b, hull[v]);
+        if (g > gain) gain = g;
+      }
+      if (gain > bestGain) { bestGain = gain; best = v; }
+    }
+    if (best < 0) break;
+    idx.push(best);
+  }
+  idx.sort((a, b) => a - b);            // preserve convex CCW ordering
+  return idx.map(i => hull[i].slice());
+}
+
+// Smooth `next` toward `prev`, first rotating next's vertex order to the cyclic
+// alignment that best matches prev. This stable correspondence is what stops the
+// corners from "breathing" — the old index-based resample blended mismatched ones.
+function matchAndLerp(prev, next, lerp) {
+  if (!prev || prev.length !== next.length) return next.map(p => p.slice());
+  const k = next.length;
+  let bestShift = 0, bestCost = Infinity;
+  for (let s = 0; s < k; s++) {
+    let cost = 0;
+    for (let i = 0; i < k; i++) {
+      const n = next[(i + s) % k];
+      const dx = n[0] - prev[i][0], dy = n[1] - prev[i][1];
+      cost += dx*dx + dy*dy;
+    }
+    if (cost < bestCost) { bestCost = cost; bestShift = s; }
+  }
+  const out = [];
+  for (let i = 0; i < k; i++) {
+    const n = next[(i + bestShift) % k];
+    out.push([
+      prev[i][0] + (n[0] - prev[i][0]) * lerp,
+      prev[i][1] + (n[1] - prev[i][1]) * lerp,
+    ]);
+  }
+  return out;
+}
+
 // ── per-pixel HSV for the whole frame ───────────────────────────────────────────
 
 function computeHSV(img, count) {
@@ -456,8 +530,9 @@ function processFrame() {
     let hull = convexHull(sil);
     hull = hull.map(p => [p[0] * scaleX, p[1] * scaleY]);
 
-    const resampled = resamplePoly(hull, HULL_VERTS);
-    state.smoothHulls[i] = lerpPoly(state.smoothHulls[i], resampled);
+    const k = SHAPE_VERTS[PIECES[i].shape] || 4;
+    const poly = kgonFromHull(hull, k);
+    state.smoothHulls[i] = matchAndLerp(state.smoothHulls[i], poly, LERP);
 
     drawOverlay(state.smoothHulls[i], i, MW, MH);
   }
@@ -599,7 +674,17 @@ function buildUI() {
       buildUI();
     };
 
-    main.append(sw, lbl, stats, calBtn, clrBtn);
+    const shapeBtn = document.createElement('button');
+    shapeBtn.className = 'cal-btn';
+    shapeBtn.textContent = SHAPE_ICON[p.shape] || '▱';
+    shapeBtn.title = 'Shape: ' + p.shape + ' (tap to change)';
+    shapeBtn.onclick = () => {
+      p.shape = SHAPE_ORDER[(SHAPE_ORDER.indexOf(p.shape) + 1) % SHAPE_ORDER.length];
+      state.smoothHulls[i] = null;   // corner count may change
+      buildUI();
+    };
+
+    main.append(sw, lbl, stats, shapeBtn, calBtn, clrBtn);
 
     const mediaRow = document.createElement('div');
     mediaRow.className = 'piece-media';
@@ -708,6 +793,7 @@ function buildUI() {
 function getCalData() {
   return {
     htol, stol, vtol, minArea, rotation, mirror,
+    shapes: PIECES.map(p => p.shape),
     pieces: state.calibrated.map((c, i) => c ? { ...c, name: PIECES[i].name } : null),
   };
 }
@@ -721,6 +807,9 @@ function applyCalData(data) {
   if (data.mirror   !== undefined) mirror   = !!data.mirror;
   refreshOrientUI();
   if (state.running) applyOrientation();
+  if (Array.isArray(data.shapes)) {
+    data.shapes.forEach((s, i) => { if (PIECES[i] && SHAPE_VERTS[s]) PIECES[i].shape = s; });
+  }
   if (Array.isArray(data.pieces)) {
     data.pieces.forEach((c, i) => {
       state.calibrated[i] = c ? { h: c.h, s: c.s, v: c.v } : null;
@@ -778,7 +867,7 @@ startBtn.onclick = async () => {
   try {
     statusEl.textContent = 'Requesting camera…';
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: {ideal: 640}, height: {ideal: 480} },
+      video: { facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} },
       audio: false,
     });
     video.srcObject = stream;
@@ -858,12 +947,10 @@ flipBtn.onclick = () => {
 };
 
 const feedBtn = document.getElementById('feedBtn');
-feedBtn.style.touchAction = 'manipulation';
-feedBtn.addEventListener('pointerdown', function (e) {
-  e.preventDefault();
-  statusEl.textContent = 'feed button tapped';   // proof of life, set first
+feedBtn.onclick = () => {
   showFeed = !showFeed;
   feedBtn.textContent = showFeed ? '📷 feed on' : '⬜ feed off';
-});
+  feedBtn.classList.toggle('active', !showFeed);
+};
 
 buildUI();
