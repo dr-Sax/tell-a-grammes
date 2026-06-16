@@ -854,13 +854,12 @@ flipBtn.onclick = () => {
 };
 
 const feedBtn = document.getElementById('feedBtn');
-function toggleFeed() {
+feedBtn.style.touchAction = 'manipulation';
+feedBtn.addEventListener('pointerdown', function (e) {
+  e.preventDefault();
+  statusEl.textContent = 'feed button tapped';   // proof of life, set first
   showFeed = !showFeed;
   feedBtn.textContent = showFeed ? '📷 feed on' : '⬜ feed off';
-  feedBtn.classList.toggle('active', !showFeed);
-  statusEl.textContent = `feed ${showFeed ? 'ON' : 'OFF'}`;   // ← confirms the tap landed
-}
-// pointerup fires for mouse, touch and pen in a single event — no desktop double-toggle.
-feedBtn.addEventListener('pointerup', toggleFeed);
+});
 
 buildUI();
