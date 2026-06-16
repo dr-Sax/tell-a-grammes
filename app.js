@@ -1,4 +1,8 @@
 // ── config ────────────────────────────────────────────────────────────────────
+document.addEventListener('pointerdown', (e) => {
+  const s = document.getElementById('status');
+  if (s) s.textContent = 'TAP → ' + (e.target.id || e.target.tagName);
+}, true);
 
 const PIECES = [
   { name: 'Piece 1', color: '#e05555' },
