@@ -1,0 +1,6 @@
+# Tell Railway (Nixpacks) to install Caddy and serve via the Caddyfile.
+[phases.setup]
+nixPkgs = ["caddy"]
+
+[start]
+cmd = "caddy run --config Caddyfile --adapter caddyfile"

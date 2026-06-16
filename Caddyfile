@@ -1,0 +1,20 @@
+# Railway static server for the Tangram tracker.
+# Serves index.html / app.js / styles.css and disables caching so every
+# deploy is picked up immediately — important on iOS Safari, which otherwise
+# clings to a stale app.js.
+{
+	admin off
+	auto_https off
+}
+
+:{$PORT:8080} {
+	# If your files live in a subfolder of the repo (e.g. tangram/),
+	# change this to:  root * /app/tangram
+	root * /app
+	encode gzip
+	file_server
+
+	# Never cache app code while iterating — always fetch the latest.
+	@app path *.html *.css *.js *.json
+	header @app Cache-Control "no-store"
+}
