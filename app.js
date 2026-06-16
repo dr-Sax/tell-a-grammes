@@ -39,6 +39,8 @@ const state = {
   calibrated: Array(N).fill(null),
   // smoothed hull polygon per piece [[x,y]…] in main canvas px
   smoothHulls: Array(N).fill(null),
+  // running mean blob area per piece (proc px) — drives the stability guard
+  smoothArea: Array(N).fill(0),
   lastCounts: null,
 };
 
@@ -50,6 +52,7 @@ let minArea = 250;  // minimum blob area in proc-scale pixels
 let rotation = 0;   // display/capture rotation: 0 | 90 | 180 | 270
 let mirror   = false; // horizontal flip
 let showFeed = true;  // draw the camera feed, or a white lightbox, behind overlays
+let cameraTrack = null; // live MediaStreamTrack — used for torch / exposure / WB controls
 
 // ── per-frame work buffers (allocated once camera starts) ───────────────────────
 
@@ -99,6 +102,7 @@ function applyOrientation() {
   readCanvas.height = PH;
   allocBuffers(PW, PH);
   state.smoothHulls = Array(N).fill(null); // coordinate space changed
+  state.smoothArea  = Array(N).fill(0);
   return { PW, PH };
 }
 
@@ -524,15 +528,27 @@ function processFrame() {
     const blob = largestBlob(maskA, PW, PH, minArea);
     counts[i] = blob ? Math.round(blob.area) : 0;
 
-    if (!blob) { state.smoothHulls[i] = null; continue; }
+    if (!blob) { state.smoothHulls[i] = null; state.smoothArea[i] = 0; continue; }
 
     const sil = silhouetteAndCommit(blob.label, PW, PH);
     let hull = convexHull(sil);
     hull = hull.map(p => [p[0] * scaleX, p[1] * scaleY]);
 
+    // stability guard: if this frame's blob area jumps wildly vs the running
+    // average, it's likely a partial / flickering detection — mostly hold the
+    // previous shape instead of snapping to it. Tames the dancing in dim light.
+    const area = blob.area;
+    const prevA = state.smoothArea[i];
+    let lerpThis = LERP;
+    if (state.smoothHulls[i] && prevA > 0) {
+      const ratio = area / prevA;
+      if (ratio < 0.6 || ratio > 1.7) lerpThis = LERP * 0.15;
+    }
+    state.smoothArea[i] = prevA > 0 ? prevA + (area - prevA) * 0.25 : area;
+
     const k = SHAPE_VERTS[PIECES[i].shape] || 4;
     const poly = kgonFromHull(hull, k);
-    state.smoothHulls[i] = matchAndLerp(state.smoothHulls[i], poly, LERP);
+    state.smoothHulls[i] = matchAndLerp(state.smoothHulls[i], poly, lerpThis);
 
     drawOverlay(state.smoothHulls[i], i, MW, MH);
   }
@@ -872,6 +888,7 @@ startBtn.onclick = async () => {
     });
     video.srcObject = stream;
     await video.play();
+    cameraTrack = stream.getVideoTracks()[0];
 
     const { PW, PH } = applyOrientation();
 
@@ -882,6 +899,7 @@ startBtn.onclick = async () => {
     cvStatusEl.textContent = `Running at ${PW}×${PH} proc res — pure JS`;
     statusEl.textContent = 'Tap "calibrate" then tap a piece in the frame';
     buildUI();
+    buildCamControls();
     processFrame();
   } catch(e) {
     statusEl.textContent = 'Camera error: ' + e.message +
@@ -945,6 +963,114 @@ flipBtn.onclick = () => {
   state.smoothHulls = Array(N).fill(null);
   refreshOrientUI();
 };
+
+// ── camera image controls (exposure / white-balance lock, torch, etc.) ───────
+// Driven entirely by getCapabilities(), so only controls the device actually
+// supports appear. Locking auto-exposure and auto-white-balance is the biggest
+// win for stable color tracking — the autos keep re-metering against the bright
+// TV white and shift your hues (and the mask) every frame.
+
+let camControlsEl = null;
+function ensureCamControls() {
+  if (camControlsEl) return;
+  camControlsEl = document.createElement('div');
+  camControlsEl.id = 'camControls';
+  camControlsEl.style.cssText =
+    'display:flex; gap:6px; flex-wrap:wrap; align-items:center; padding:4px 0;';
+  document.getElementById('calControls').after(camControlsEl);
+}
+
+async function applyCam(constraint) {
+  if (!cameraTrack) return false;
+  try { await cameraTrack.applyConstraints({ advanced: [constraint] }); return true; }
+  catch (e) { statusEl.textContent = 'cam: ' + e.message; return false; }
+}
+
+function buildCamControls() {
+  ensureCamControls();
+  const wrap = camControlsEl;
+  wrap.innerHTML = '';
+  if (!cameraTrack || !cameraTrack.getCapabilities) {
+    wrap.textContent = 'camera controls not exposed on this device';
+    return;
+  }
+  const caps = cameraTrack.getCapabilities();
+  const settings = cameraTrack.getSettings ? cameraTrack.getSettings() : {};
+
+  // torch (boolean)
+  if (caps.torch) {
+    const b = document.createElement('button');
+    b.className = 'cal-btn';
+    const sync = () => {
+      const on = !!(cameraTrack.getSettings && cameraTrack.getSettings().torch);
+      b.textContent = on ? '\u{1f526} torch on' : '\u{1f526} torch off';
+      b.classList.toggle('active', on);
+    };
+    b.onclick = async () => {
+      const on = !!(cameraTrack.getSettings && cameraTrack.getSettings().torch);
+      await applyCam({ torch: !on });
+      sync();
+    };
+    sync();
+    wrap.appendChild(b);
+  }
+
+  // enum locks: exposure / white balance / focus → toggle auto vs manual (lock)
+  for (const [prop, label] of [
+    ['exposureMode',     'exp'],
+    ['whiteBalanceMode', 'WB'],
+    ['focusMode',        'focus'],
+  ]) {
+    const modes = caps[prop];
+    if (!Array.isArray(modes) || !modes.includes('manual') ||
+        !(modes.includes('continuous') || modes.includes('single-shot'))) continue;
+    const auto = modes.includes('continuous') ? 'continuous' : 'single-shot';
+    const b = document.createElement('button');
+    b.className = 'cal-btn';
+    const sync = () => {
+      const locked = (cameraTrack.getSettings && cameraTrack.getSettings()[prop]) === 'manual';
+      b.textContent = `${label}: ${locked ? 'lock' : 'auto'}`;
+      b.classList.toggle('active', locked);
+    };
+    b.onclick = async () => {
+      const cur = cameraTrack.getSettings && cameraTrack.getSettings()[prop];
+      await applyCam({ [prop]: cur === 'manual' ? auto : 'manual' });
+      setTimeout(buildCamControls, 200); // re-read so manual-only sliders appear
+    };
+    sync();
+    wrap.appendChild(b);
+  }
+
+  // numeric sliders for whatever the device exposes
+  for (const [prop, label] of [
+    ['exposureCompensation', 'exp comp'],
+    ['exposureTime',         'shutter'],
+    ['iso',                  'ISO'],
+    ['brightness',           'bright'],
+    ['contrast',             'contrast'],
+    ['saturation',           'sat'],
+    ['sharpness',            'sharp'],
+    ['colorTemperature',     'temp K'],
+    ['focusDistance',        'focus dist'],
+  ]) {
+    const cap = caps[prop];
+    if (!cap || typeof cap !== 'object' || cap.min == null || cap.max == null || cap.min === cap.max) continue;
+    const g = document.createElement('div');
+    g.className = 'ctrl-group';
+    const lab = document.createElement('label');
+    lab.textContent = label;
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = cap.min; range.max = cap.max;
+    range.step = cap.step || (cap.max - cap.min) / 100 || 1;
+    const cur = settings[prop];
+    range.value = (cur != null) ? cur : (cap.min + cap.max) / 2;
+    range.style.flex = '1';
+    range.oninput = () => applyCam({ [prop]: +range.value });
+    g.append(lab, range);
+    wrap.appendChild(g);
+  }
+}
 
 const feedBtn = document.getElementById('feedBtn');
 feedBtn.onclick = () => {
