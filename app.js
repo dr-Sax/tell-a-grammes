@@ -20,15 +20,14 @@ const SHAPE_ORDER = ['triangle', 'square', 'parallelogram'];
 
 // Smoothing: lerp factor for hull vertices each frame
 const LERP = 0.3;
-// Hull resampled to this many vertices for stable lerping
-const HULL_VERTS = 20;
 // Tracking runs at roughly this width in px, regardless of capture resolution.
 // This decouples display sharpness (capture res) from tracking cost — bump the
 // camera to 1280x720 for a crisp feed without making detection any slower.
 const PROC_TARGET_W = 320;
-// Morphology radii (structuring element = (2r+1) square, separable)
-const OPEN_R  = 1;   // erode→dilate: removes speckle
-const CLOSE_R = 1;   // dilate→erode: bridges small gaps from glare
+// Morphology (structuring element = (2r+1) square, separable). For bordered
+// pieces we do NO opening — eroding a thin colour ring breaks it apart. We only
+// close, to bridge small gaps in the ring (glare / anti-aliasing on the edge).
+const CLOSE_R = 2;   // dilate→erode: keeps the border ring a single component
 
 // ── state ─────────────────────────────────────────────────────────────────────
 
@@ -47,12 +46,12 @@ const state = {
 let htol    = 9;    // hue tolerance, in OpenCV-style 0-180 units (×2 = degrees)
 let stol    = 48;   // saturation tolerance on 0-255 scale (÷255 = fraction)
 let vtol    = 35;   // value tolerance on 0-255 scale (÷255 = fraction)
-let minArea = 250;  // minimum blob area in proc-scale pixels
+let minArea = 80;   // min connected-component area in proc px — a border ring
+                    // is far smaller than a filled blob, so keep this low
 
 let rotation = 0;   // display/capture rotation: 0 | 90 | 180 | 270
 let mirror   = false; // horizontal flip
 let showFeed = true;  // draw the camera feed, or a white lightbox, behind overlays
-let cameraTrack = null; // live MediaStreamTrack — used for torch / exposure / WB controls
 
 // ── per-frame work buffers (allocated once camera starts) ───────────────────────
 
@@ -236,32 +235,7 @@ mainCanvas.addEventListener('pointerdown', () => {
   for (const m of pieceMedia) if (m && m.type === 'video' && m.el.paused) m.el.play().catch(()=>{});
 });
 
-// ── hull smoothing ────────────────────────────────────────────────────────────
-
-function resamplePoly(pts, n) {
-  if (pts.length === 0) return [];
-  if (pts.length === n) return pts;
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const t  = (i / n) * pts.length;
-    const lo = Math.floor(t) % pts.length;
-    const hi = (lo + 1) % pts.length;
-    const f  = t - Math.floor(t);
-    out.push([
-      pts[lo][0] + (pts[hi][0] - pts[lo][0]) * f,
-      pts[lo][1] + (pts[hi][1] - pts[lo][1]) * f,
-    ]);
-  }
-  return out;
-}
-
-function lerpPoly(prev, next) {
-  if (!prev || prev.length !== next.length) return next;
-  return prev.map((p, i) => [
-    p[0] + (next[i][0] - p[0]) * LERP,
-    p[1] + (next[i][1] - p[1]) * LERP,
-  ]);
-}
+// ── convex hull ───────────────────────────────────────────
 
 // Andrew's monotone-chain convex hull. pts: [[x,y]…] → hull [[x,y]…] CCW
 function convexHull(pts) {
@@ -419,12 +393,7 @@ function morphPass(src, dst, tmp, w, h, r, erode) {
   }
 }
 
-// open/close operate on maskA, using maskB & maskC as scratch, result back in maskA
-function morphOpen(w, h, r) {
-  if (r <= 0) return;
-  morphPass(maskA, maskB, maskC, w, h, r, true);   // erode → maskB
-  morphPass(maskB, maskA, maskC, w, h, r, false);  // dilate → maskA
-}
+// close operates on maskA, using maskB & maskC as scratch, result back in maskA
 function morphClose(w, h, r) {
   if (r <= 0) return;
   morphPass(maskA, maskB, maskC, w, h, r, false);  // dilate → maskB
@@ -464,19 +433,31 @@ function largestBlob(mask, w, h, minA) {
   return bestLabel ? { label: bestLabel, area: bestArea } : null;
 }
 
-// for the winning label: mark committed pixels and collect per-row silhouette points
+// For the winning label (a border RING): record per-row outer extents, then
+// span-fill the interior into committedBuf and tally the FILLED area. The hole
+// sits strictly between minX and maxX, so the outer silhouette — and therefore
+// the convex hull — is identical to a solid piece. Filling the span restores the
+// solid-blob semantics the rest of the pipeline (area guard, overlap claiming)
+// was written against.
 function silhouetteAndCommit(label, w, h) {
   for (let y = 0; y < h; y++) { silMinX[y] = 1e9; silMaxX[y] = -1; }
+  // pass 1: per-row outer extents of the ring
   for (let y = 0; y < h; y++) {
     const off = y * w;
     for (let x = 0; x < w; x++) {
-      const idx = off + x;
-      if (labels[idx] === label) {
-        committedBuf[idx] = 1;
+      if (labels[off + x] === label) {
         if (x < silMinX[y]) silMinX[y] = x;
         if (x > silMaxX[y]) silMaxX[y] = x;
       }
     }
+  }
+  // pass 2: commit the full span (border + enclosed hole) and count filled area
+  let filled = 0;
+  for (let y = 0; y < h; y++) {
+    if (silMaxX[y] < 0) continue;
+    const off = y * w;
+    for (let x = silMinX[y]; x <= silMaxX[y]; x++) committedBuf[off + x] = 1;
+    filled += silMaxX[y] - silMinX[y] + 1;
   }
   const pts = [];
   for (let y = 0; y < h; y++) {
@@ -485,7 +466,7 @@ function silhouetteAndCommit(label, w, h) {
       if (silMaxX[y] !== silMinX[y]) pts.push([silMaxX[y], y]);
     }
   }
-  return pts;
+  return { pts, filled };
 }
 
 // ── main loop ────────────────────────────────────────────────────────────────
@@ -522,22 +503,22 @@ function processFrame() {
 
   for (const i of order) {
     buildMask(state.calibrated[i], maskA, count);
-    morphOpen(PW, PH, OPEN_R);
-    morphClose(PW, PH, CLOSE_R);
+    morphClose(PW, PH, CLOSE_R);   // no opening — it would erode the thin border
 
     const blob = largestBlob(maskA, PW, PH, minArea);
-    counts[i] = blob ? Math.round(blob.area) : 0;
+    if (!blob) { counts[i] = 0; state.smoothHulls[i] = null; state.smoothArea[i] = 0; continue; }
 
-    if (!blob) { state.smoothHulls[i] = null; state.smoothArea[i] = 0; continue; }
-
-    const sil = silhouetteAndCommit(blob.label, PW, PH);
+    // min/max-X already traces the outer silhouette of the (convex) ring; the
+    // span-fill in silhouetteAndCommit gives us the solid-equivalent area.
+    const { pts: sil, filled } = silhouetteAndCommit(blob.label, PW, PH);
+    counts[i] = filled;
     let hull = convexHull(sil);
     hull = hull.map(p => [p[0] * scaleX, p[1] * scaleY]);
 
-    // stability guard: if this frame's blob area jumps wildly vs the running
-    // average, it's likely a partial / flickering detection — mostly hold the
-    // previous shape instead of snapping to it. Tames the dancing in dim light.
-    const area = blob.area;
+    // stability guard: if this frame's area jumps wildly vs the running average
+    // it's likely a partial detection (a momentary gap in the border) — mostly
+    // hold the previous shape instead of snapping to it.
+    const area = filled;
     const prevA = state.smoothArea[i];
     let lerpThis = LERP;
     if (state.smoothHulls[i] && prevA > 0) {
@@ -675,7 +656,7 @@ function buildUI() {
       const on = state.calibrating >= 0;
       tapHint.style.display   = on ? 'block' : 'none';
       crosshair.style.display = on ? 'block' : 'none';
-      tapHint.textContent = on ? `Tap the ${PIECES[state.calibrating].name} in the frame` : '';
+      tapHint.textContent = on ? `Tap the colored BORDER of ${PIECES[state.calibrating].name}` : '';
       buildUI();
     };
 
@@ -888,7 +869,6 @@ startBtn.onclick = async () => {
     });
     video.srcObject = stream;
     await video.play();
-    cameraTrack = stream.getVideoTracks()[0];
 
     const { PW, PH } = applyOrientation();
 
@@ -897,9 +877,8 @@ startBtn.onclick = async () => {
     controlsEl.style.display = 'flex';
     document.getElementById('calControls').style.display = 'flex';
     cvStatusEl.textContent = `Running at ${PW}×${PH} proc res — pure JS`;
-    statusEl.textContent = 'Tap "calibrate" then tap a piece in the frame';
+    statusEl.textContent = 'Tip: turn feed off (white), then calibrate by tapping each piece border';
     buildUI();
-    buildCamControls();
     processFrame();
   } catch(e) {
     statusEl.textContent = 'Camera error: ' + e.message +
@@ -964,119 +943,22 @@ flipBtn.onclick = () => {
   refreshOrientUI();
 };
 
-// ── camera image controls (exposure / white-balance lock, torch, etc.) ───────
-// Driven entirely by getCapabilities(), so only controls the device actually
-// supports appear. Locking auto-exposure and auto-white-balance is the biggest
-// win for stable color tracking — the autos keep re-metering against the bright
-// TV white and shift your hues (and the mask) every frame.
-
-let camControlsEl = null;
-function ensureCamControls() {
-  if (camControlsEl) return;
-  camControlsEl = document.createElement('div');
-  camControlsEl.id = 'camControls';
-  camControlsEl.style.cssText =
-    'display:flex; gap:6px; flex-wrap:wrap; align-items:center; padding:4px 0;';
-  document.getElementById('calControls').after(camControlsEl);
-}
-
-async function applyCam(constraint) {
-  if (!cameraTrack) return false;
-  try { await cameraTrack.applyConstraints({ advanced: [constraint] }); return true; }
-  catch (e) { statusEl.textContent = 'cam: ' + e.message; return false; }
-}
-
-function buildCamControls() {
-  ensureCamControls();
-  const wrap = camControlsEl;
-  wrap.innerHTML = '';
-  if (!cameraTrack || !cameraTrack.getCapabilities) {
-    wrap.textContent = 'camera controls not exposed on this device';
-    return;
-  }
-  const caps = cameraTrack.getCapabilities();
-  const settings = cameraTrack.getSettings ? cameraTrack.getSettings() : {};
-
-  // torch (boolean)
-  if (caps.torch) {
-    const b = document.createElement('button');
-    b.className = 'cal-btn';
-    const sync = () => {
-      const on = !!(cameraTrack.getSettings && cameraTrack.getSettings().torch);
-      b.textContent = on ? '\u{1f526} torch on' : '\u{1f526} torch off';
-      b.classList.toggle('active', on);
-    };
-    b.onclick = async () => {
-      const on = !!(cameraTrack.getSettings && cameraTrack.getSettings().torch);
-      await applyCam({ torch: !on });
-      sync();
-    };
-    sync();
-    wrap.appendChild(b);
-  }
-
-  // enum locks: exposure / white balance / focus → toggle auto vs manual (lock)
-  for (const [prop, label] of [
-    ['exposureMode',     'exp'],
-    ['whiteBalanceMode', 'WB'],
-    ['focusMode',        'focus'],
-  ]) {
-    const modes = caps[prop];
-    if (!Array.isArray(modes) || !modes.includes('manual') ||
-        !(modes.includes('continuous') || modes.includes('single-shot'))) continue;
-    const auto = modes.includes('continuous') ? 'continuous' : 'single-shot';
-    const b = document.createElement('button');
-    b.className = 'cal-btn';
-    const sync = () => {
-      const locked = (cameraTrack.getSettings && cameraTrack.getSettings()[prop]) === 'manual';
-      b.textContent = `${label}: ${locked ? 'lock' : 'auto'}`;
-      b.classList.toggle('active', locked);
-    };
-    b.onclick = async () => {
-      const cur = cameraTrack.getSettings && cameraTrack.getSettings()[prop];
-      await applyCam({ [prop]: cur === 'manual' ? auto : 'manual' });
-      setTimeout(buildCamControls, 200); // re-read so manual-only sliders appear
-    };
-    sync();
-    wrap.appendChild(b);
-  }
-
-  // numeric sliders for whatever the device exposes
-  for (const [prop, label] of [
-    ['exposureCompensation', 'exp comp'],
-    ['exposureTime',         'shutter'],
-    ['iso',                  'ISO'],
-    ['brightness',           'bright'],
-    ['contrast',             'contrast'],
-    ['saturation',           'sat'],
-    ['sharpness',            'sharp'],
-    ['colorTemperature',     'temp K'],
-    ['focusDistance',        'focus dist'],
-  ]) {
-    const cap = caps[prop];
-    if (!cap || typeof cap !== 'object' || cap.min == null || cap.max == null || cap.min === cap.max) continue;
-    const g = document.createElement('div');
-    g.className = 'ctrl-group';
-    const lab = document.createElement('label');
-    lab.textContent = label;
-    const range = document.createElement('input');
-    range.type = 'range';
-    range.min = cap.min; range.max = cap.max;
-    range.step = cap.step || (cap.max - cap.min) / 100 || 1;
-    const cur = settings[prop];
-    range.value = (cur != null) ? cur : (cap.min + cap.max) / 2;
-    range.style.flex = '1';
-    range.oninput = () => applyCam({ [prop]: +range.value });
-    g.append(lab, range);
-    wrap.appendChild(g);
-  }
-}
-
 const feedBtn = document.getElementById('feedBtn');
 feedBtn.onclick = () => {
   showFeed = !showFeed;
   feedBtn.textContent = showFeed ? '📷 feed on' : '⬜ feed off';
   feedBtn.classList.toggle('active', !showFeed);
 };
+
+// keep the sliders showing the JS defaults above on first load
+(() => {
+  const sync = (id, val) => {
+    const r = document.getElementById(id + 'Range');
+    const v = document.getElementById(id + 'Val');
+    if (r) r.value = val;
+    if (v) v.textContent = val;
+  };
+  sync('htol', htol); sync('stol', stol); sync('vtol', vtol); sync('minArea', minArea);
+})();
 
 buildUI();

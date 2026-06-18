@@ -9,11 +9,11 @@
 <meta name="apple-mobile-web-app-title" content="Tangram">
 <title>Tangram Tracker</title>
 <link rel="stylesheet" href="styles.css">
-<script type="module" src="js/main.js?v=4"></script>
+<script defer src="app.js?v=3"></script>
 </head>
 <body>
 <div id="app">
-  <h1>Tangram border tracker — pure JS (no OpenCV)</h1>
+  <h1>Tangram color tracker — pure JS (no OpenCV)</h1>
 
   <div id="canvasWrap">
     <canvas id="mainCanvas"></canvas>
@@ -40,8 +40,8 @@
       <input type="range" id="vtolRange" min="10" max="150" value="35" style="flex:1">
     </div>
     <div class="ctrl-group">
-      <label>Min area <span id="minAreaVal">80</span></label>
-      <input type="range" id="minAreaRange" min="20" max="3000" value="80" step="10" style="flex:1">
+      <label>Min area <span id="minAreaVal">250</span></label>
+      <input type="range" id="minAreaRange" min="50" max="3000" value="250" step="50" style="flex:1">
     </div>
   </div>
   <div id="calControls" style="display:none; gap:6px; padding:4px 0; flex-wrap:wrap;">
