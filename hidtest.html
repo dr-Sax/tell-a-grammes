@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HID Connect Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #111; color: #eee; font-family: system-ui, sans-serif; min-height: 100vh; padding: 16px; }
+  h1 { font-size: 14px; color: #777; font-weight: 500; margin-bottom: 12px; }
+  #statusCard {
+    border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 12px;
+    border: 1px solid #2a2a2a; transition: background 0.2s, border-color 0.2s;
+  }
+  #statusCard.disconnected { background: #1a1a1a; }
+  #statusCard.connected { background: #0d2e0d; border-color: #4a9a4a; }
+  #statusDot {
+    width: 14px; height: 14px; border-radius: 50%; display: inline-block;
+    margin-right: 8px; vertical-align: middle; background: #444;
+  }
+  #statusCard.connected #statusDot { background: #6fda6f; box-shadow: 0 0 8px #6fda6f; }
+  #statusText { font-size: 18px; font-weight: 600; vertical-align: middle; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .card { flex: 1; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 12px; }
+  .card .label { font-size: 11px; color: #666; }
+  .card .value { font-size: 16px; color: #ccc; margin-top: 2px; font-family: ui-monospace, monospace; }
+  #webhidSection { margin-top: 16px; padding-top: 12px; border-top: 1px solid #222; }
+  #webhidSection h2 { font-size: 12px; color: #555; margin-bottom: 8px; font-weight: 500; }
+  button {
+    background: #1e1e1e; color: #ddd; border: 1px solid #383838; border-radius: 8px;
+    padding: 8px 14px; cursor: pointer; font-size: 13px;
+  }
+  button:disabled { opacity: 0.35; cursor: default; }
+  #webhidList { font-size: 11px; color: #666; margin-top: 8px; font-family: ui-monospace, monospace; }
+  .hint { font-size: 11px; color: #555; margin-top: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>HID Connect Test — passive activity detector</h1>
+
+  <div id="statusCard" class="disconnected">
+    <span id="statusDot"></span><span id="statusText">No HID activity detected</span>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <div class="label">last event type</div>
+      <div class="value" id="lastType">—</div>
+    </div>
+    <div class="card">
+      <div class="label">last seen</div>
+      <div class="value" id="lastSeen">—</div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="card">
+      <div class="label">last dx, dy</div>
+      <div class="value" id="lastDelta">0, 0</div>
+    </div>
+    <div class="card">
+      <div class="label">events / sec</div>
+      <div class="value" id="evRate">0</div>
+    </div>
+  </div>
+
+  <div id="webhidSection">
+    <h2>WebHID diagnostic (desktop Chrome/Edge only — does nothing on iOS)</h2>
+    <button id="reqHidBtn">Request HID device…</button>
+    <div id="webhidList">no WebHID devices granted</div>
+  </div>
+
+  <p class="hint">
+    This page can't identify the Arduino specifically — once it enumerates as a
+    standard mouse, the browser treats it like any other mouse. "Connected" here
+    means "pointer/wheel input arrived within the last 700ms." On iOS, plug in
+    the Arduino (or pair it over Bluetooth as a HID mouse), then move the knob —
+    the card above should turn green. Tap once on the page first if nothing
+    happens; some browsers withhold pointer events until the page has focus.
+  </p>
+
+<script type="module">
+  import { hidState, startHidWatch } from './hidDetect.js';
+
+  startHidWatch();
+
+  const statusCard = document.getElementById('statusCard');
+  const statusText = document.getElementById('statusText');
+  const lastType = document.getElementById('lastType');
+  const lastSeen = document.getElementById('lastSeen');
+  const lastDelta = document.getElementById('lastDelta');
+  const evRate = document.getElementById('evRate');
+  const webhidList = document.getElementById('webhidList');
+  const reqHidBtn = document.getElementById('reqHidBtn');
+
+  if (!('hid' in navigator)) reqHidBtn.disabled = true;
+
+  reqHidBtn.onclick = async () => {
+    try {
+      const { requestWebHidDevice } = await import('./hidDetect.js');
+      await requestWebHidDevice();
+    } catch (e) {
+      webhidList.textContent = 'WebHID request failed/unsupported: ' + e.message;
+    }
+  };
+
+  let lastCount = 0;
+  setInterval(() => {
+    statusCard.className = hidState.connected ? 'connected' : 'disconnected';
+    statusText.textContent = hidState.connected
+      ? 'HID activity detected (treating as Arduino mouse)'
+      : 'No HID activity detected';
+    lastType.textContent = hidState.lastEventType || '—';
+    lastDelta.textContent = `${hidState.lastDelta.dx.toFixed(1)}, ${hidState.lastDelta.dy.toFixed(1)}`;
+    lastSeen.textContent = hidState.lastSeen
+      ? `${((performance.now() - hidState.lastSeen) / 1000).toFixed(1)}s ago`
+      : '—';
+    evRate.textContent = hidState.eventCount - lastCount;
+    lastCount = hidState.eventCount;
+
+    if (hidState.webHidDevices.length) {
+      webhidList.textContent = hidState.webHidDevices
+        .map(d => `${d.productName || 'unknown'} (vendorId ${d.vendorId})`)
+        .join(', ');
+    }
+  }, 250);
+</script>
+</body>
+</html>
