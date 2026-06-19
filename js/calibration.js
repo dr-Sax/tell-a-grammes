@@ -38,6 +38,7 @@ function calibrateAt(clientX, clientY) {
   const cal = { h: hs / n, s: ss / n, v: vs / n };
   state.calibrated[state.calibrating] = cal;
   state.smoothHulls[state.calibrating] = null;
+  state.boundaryAnchor[state.calibrating] = null;
   statusEl.textContent =
     `${PIECES[state.calibrating].name} → H=${Math.round(cal.h)}° S=${cal.s.toFixed(2)} V=${cal.v.toFixed(2)}`;
   state.calibrating = -1;
@@ -89,6 +90,7 @@ function applyCalData(data) {
     data.pieces.forEach((c, i) => {
       state.calibrated[i] = c ? { h: c.h, s: c.s, v: c.v } : null;
       state.smoothHulls[i] = null;
+      state.boundaryAnchor[i] = null;
     });
   }
   buildUI();
@@ -124,6 +126,7 @@ export function wireSaveLoad() {
     if (!confirm('Clear all calibrations?')) return;
     state.calibrated = Array(N).fill(null);
     state.smoothHulls = Array(N).fill(null);
+    state.boundaryAnchor = Array(N).fill(null);
     $('calName').textContent = '';
     buildUI();
   };

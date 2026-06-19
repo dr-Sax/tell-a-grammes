@@ -90,6 +90,7 @@ export function buildUI() {
     clrBtn.onclick = () => {
       state.calibrated[i] = null;
       state.smoothHulls[i] = null;
+      state.boundaryAnchor[i] = null;
       buildUI();
     };
 
@@ -189,6 +190,7 @@ export function wireViewControls() {
   $('flipBtn').onclick = () => {
     state.mirror = !state.mirror;             // draw-time only, no realloc
     state.smoothHulls = Array(N).fill(null);
+    state.boundaryAnchor = Array(N).fill(null);
     refreshOrientUI();
   };
   const feedBtn = $('feedBtn');

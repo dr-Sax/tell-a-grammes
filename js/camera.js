@@ -41,8 +41,9 @@ export function applyOrientation() {
   readCanvas.width = PW;
   readCanvas.height = PH;
   allocBuffers(PW, PH);
-  state.smoothHulls = Array(N).fill(null);  // coordinate space changed
+  state.smoothHulls = Array(N).fill(null);     // coordinate space changed
   state.smoothArea  = Array(N).fill(0);
+  state.boundaryAnchor = Array(N).fill(null);  // proc-space anchor is now stale too
   return { PW, PH };
 }
 

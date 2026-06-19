@@ -1,25 +1,31 @@
 // ── tracker: pixels → polygon ─────────────────────────────────────────────────
 // The detection engine. Owns the per-frame typed-array buffers and turns one
-// calibrated colour into a fitted polygon. Pieces are detected independently —
-// there is no cross-piece pixel claiming.
+// calibrated colour into a fixed-N boundary polygon. Pieces are detected
+// independently — there is no cross-piece pixel claiming.
+//
+// Detection no longer tries to find "the k true corners" of a shape. Instead it
+// walks the blob's actual outer perimeter pixel-by-pixel (Moore-neighbor
+// tracing) and resamples that trace down to a fixed BOUNDARY_N points, evenly
+// spaced by arc length. This sidesteps corner-identification entirely — no
+// shape-specific fitting, no greedy area-maximization that can tie/collapse
+// corners (the square-collapsing-to-a-triangle bug). The resulting polygon is
+// good enough for clip-path / canvas-clip overlay rendering without needing
+// pixel-exact corners.
 
-import { params, CLOSE_R } from './config.js';
-import { convexHull, kgonFromHull } from './geometry.js';
+import { params, CLOSE_R, BOUNDARY_N } from './config.js';
 
 // per-frame work buffers (allocated once proc dimensions are known)
 let Hc, Sc, Vc;            // per-pixel HSV (Float32: H 0-360, S/V 0-1)
 let maskA, maskB, maskC;   // binary scratch masks (Uint8)
 let labels, labelStack;    // connected-component labels + flood-fill stack
-let silMinX, silMaxX;      // per-row silhouette extents for the winning blob
-let silMinY, silMaxY;      // per-column silhouette extents for the winning blob
+let visited;               // boundary-trace visited flag (Uint8), safety net only
 
 export function allocBuffers(w, h) {
   const n = w * h;
   Hc = new Float32Array(n); Sc = new Float32Array(n); Vc = new Float32Array(n);
   maskA = new Uint8Array(n); maskB = new Uint8Array(n); maskC = new Uint8Array(n);
   labels = new Int32Array(n); labelStack = new Int32Array(n);
-  silMinX = new Int32Array(h); silMaxX = new Int32Array(h);
-  silMinY = new Int32Array(w); silMaxY = new Int32Array(w);
+  visited = new Uint8Array(n);
 }
 
 // RGB→HSV for the whole frame, once. (Inlined for speed; see hsv.js note.)
@@ -123,69 +129,126 @@ function largestBlob(w, h, minA) {
   return bestLabel ? { label: bestLabel, area: bestArea } : null;
 }
 
-// For the winning ring: per-row outer extents AND per-column outer extents
-// together give full coverage of the outer silhouette regardless of edge
-// orientation. Row-extent alone loses resolution on edges that run shallow
-// relative to scanlines (e.g. a parallelogram's long sides, or a square near
-// 45°) — those rows are dominated by the near-horizontal edges and tell you
-// almost nothing about where the acute-angle corners actually sit. Column
-// extents recover exactly that missing signal, and vice versa for near-
-// vertical edges, so the two passes are complementary by construction.
-//
-// The hole sits strictly between the outer crossings in both row and column
-// scans (it's unlabeled background, sandwiched between two labeled boundary
-// hits), so it's ignored automatically in both passes — same guarantee as
-// before, just now holds in both directions.
-//
-// `filled` (the solid-equivalent area used by the stability guard upstream)
-// is still derived purely from the row pass — that's a correct area estimate
-// on its own and doesn't need the column data.
-function silhouette(label, w, h) {
-  for (let y = 0; y < h; y++) { silMinX[y] = 1e9; silMaxX[y] = -1; }
-  for (let x = 0; x < w; x++) { silMinY[x] = 1e9; silMaxY[x] = -1; }
+// Moore-neighbor 8-direction offsets, in a fixed rotational order (CCW).
+// Index meanings: 0=E,1=NE,2=N,3=NW,4=W,5=SW,6=S,7=SE
+const MOORE_DX = [ 1, 1, 0,-1,-1,-1, 0, 1];
+const MOORE_DY = [ 0,-1,-1,-1, 0, 1, 1, 1];
 
-  for (let y = 0; y < h; y++) {
-    const off = y * w;
-    for (let x = 0; x < w; x++) {
-      if (labels[off + x] === label) {
-        if (x < silMinX[y]) silMinX[y] = x;
-        if (x > silMaxX[y]) silMaxX[y] = x;
-        if (y < silMinY[x]) silMinY[x] = y;
-        if (y > silMaxY[x]) silMaxY[x] = y;
+// Trace the outer boundary of `label` starting from `startIdx` (which must be
+// a labeled pixel already known to sit on the boundary — see findStart below).
+// Returns an ordered list of [x,y] boundary pixels, walking once around.
+// Standard Moore-neighbor tracing: from the direction we *arrived* from, scan
+// the 8 neighbors in rotational order starting just past that direction, and
+// step to the first labeled one found. This hugs the outer edge and never
+// crosses into the unlabeled hole (the hole is never labeled, so it's simply
+// invisible to this walk — same hole-ignoring guarantee as before, just now
+// via the walk itself rather than via row/column extents).
+function traceBoundary(label, startIdx, w, h) {
+  const pts = [];
+  const maxSteps = w * h * 2; // generous safety cap; real boundaries are O(perimeter)
+
+  let idx = startIdx;
+  let x = idx % w, y = (idx / w) | 0;
+  // arrive-direction: pretend we arrived from the west, so the first scan
+  // begins at N — irrelevant for correctness, just a fixed convention.
+  let arriveDir = 4;
+  const startX = x, startY = y;
+
+  for (let step = 0; step < maxSteps; step++) {
+    pts.push([x, y]);
+
+    // scan starting just after the reverse of the direction we arrived from
+    const scanStart = (arriveDir + 5) % 8; // (arriveDir+4)%8 = back-direction; +1 to start past it
+    let found = false;
+    for (let k = 0; k < 8; k++) {
+      const dir = (scanStart + k) % 8;
+      const nx = x + MOORE_DX[dir], ny = y + MOORE_DY[dir];
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      if (labels[ny * w + nx] === label) {
+        x = nx; y = ny; arriveDir = dir; found = true;
+        break;
       }
+    }
+    if (!found) break; // isolated single pixel — nothing else to walk to
+    if (x === startX && y === startY && step > 0) break; // back to start
+  }
+  return pts;
+}
+
+// Find a pixel on the outer boundary of `label` to start tracing from.
+// Scanning row-major and taking the first labeled pixel found is guaranteed
+// to be a boundary pixel: nothing above it or to its left (within the raster
+// scan order) is labeled, so it necessarily has an unlabeled/edge neighbor.
+function findStart(label, w, h) {
+  const n = w * h;
+  for (let s = 0; s < n; s++) {
+    if (labels[s] === label) return s;
+  }
+  return -1;
+}
+
+// Resample an ordered boundary trace to exactly `n` points, evenly spaced by
+// arc length, starting as close as possible to `anchorXY` (previous frame's
+// start point in the same proc-pixel space) so point index stays stable
+// frame-to-frame even though the raw trace's point count/order varies.
+function resampleByArcLength(trace, n, anchorXY) {
+  const m = trace.length;
+  if (m === 0) return null;
+  if (m < 3) return trace.map(p => p.slice()); // degenerate, nothing to resample
+
+  // rotate the trace array so it starts at the point nearest the anchor
+  let startI = 0;
+  if (anchorXY) {
+    let bestD = Infinity;
+    for (let i = 0; i < m; i++) {
+      const dx = trace[i][0] - anchorXY[0], dy = trace[i][1] - anchorXY[1];
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; startI = i; }
     }
   }
 
-  const pts = [];
-  let filled = 0;
-
-  // row-extent points (also doubles as the area estimate)
-  for (let y = 0; y < h; y++) {
-    if (silMaxX[y] < 0) continue;
-    filled += silMaxX[y] - silMinX[y] + 1;
-    pts.push([silMinX[y], y]);
-    if (silMaxX[y] !== silMinX[y]) pts.push([silMaxX[y], y]);
+  // cumulative arc length, starting at startI, wrapping once around
+  const cum = new Float64Array(m + 1);
+  for (let i = 0; i < m; i++) {
+    const a = trace[(startI + i) % m];
+    const b = trace[(startI + i + 1) % m];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    cum[i + 1] = cum[i] + Math.sqrt(dx * dx + dy * dy);
   }
+  const total = cum[m];
+  if (total <= 0) return trace.map(p => p.slice());
 
-  // column-extent points (no area contribution — row pass already covers that)
-  for (let x = 0; x < w; x++) {
-    if (silMaxY[x] < 0) continue;
-    pts.push([x, silMinY[x]]);
-    if (silMaxY[x] !== silMinY[x]) pts.push([x, silMaxY[x]]);
+  const out = [];
+  let seg = 0;
+  for (let k = 0; k < n; k++) {
+    const target = (total * k) / n;
+    while (seg < m - 1 && cum[seg + 1] < target) seg++;
+    const segLen = cum[seg + 1] - cum[seg];
+    const t = segLen > 0 ? (target - cum[seg]) / segLen : 0;
+    const a = trace[(startI + seg) % m];
+    const b = trace[(startI + seg + 1) % m];
+    out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
   }
-
-  return { pts, filled };
+  return out;
 }
 
-// Full per-piece pipeline. `cal` = calibrated HSV, `k` = corner count, w×h =
-// proc dims. Returns { poly:[[x,y]…k] in proc px, filled } or null. computeHSV
-// must have been called for this frame first.
-export function detectPiece(cal, k, w, h) {
+// Full per-piece pipeline. `cal` = calibrated HSV, w×h = proc dims, `anchorXY`
+// = previous frame's boundary[0] in proc px (or null on first detection).
+// Returns { poly:[[x,y]…BOUNDARY_N] in proc px, filled, anchorXY } or null.
+// computeHSV must have been called for this frame first.
+export function detectPiece(cal, w, h, anchorXY) {
   buildMask(cal, w * h);
   morphClose(w, h, CLOSE_R);
   const blob = largestBlob(w, h, params.minArea);
   if (!blob) return null;
-  const { pts, filled } = silhouette(blob.label, w, h);
-  const poly = kgonFromHull(convexHull(pts), k);
-  return { poly, filled };
+
+  const startIdx = findStart(blob.label, w, h);
+  if (startIdx < 0) return null;
+  const trace = traceBoundary(blob.label, startIdx, w, h);
+  if (trace.length < 3) return null;
+
+  const poly = resampleByArcLength(trace, BOUNDARY_N, anchorXY);
+  if (!poly) return null;
+
+  return { poly, filled: blob.area, anchorXY: poly[0] };
 }

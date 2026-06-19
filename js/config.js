@@ -2,9 +2,10 @@
 // Static configuration + live tuning knobs. Everything here is "the dials";
 // per-frame runtime state lives in state.js.
 
-// One entry per physical tangram piece. `shape` is fixed and only selects how
-// many corners we fit (see SHAPE_VERTS). `color` is just the placeholder swatch
-// shown before a piece has been calibrated.
+// One entry per physical tangram piece. `shape` is currently unused by
+// detection (boundary tracing doesn't need a corner count) but is kept around
+// in case it's useful later for per-piece cosmetics or future shape-aware
+// features (e.g. same-color piece merging).
 export const PIECES = [
   { name: 'Piece 1', color: '#e05555', shape: 'triangle' },
   { name: 'Piece 2', color: '#e09055', shape: 'triangle' },
@@ -16,8 +17,13 @@ export const PIECES = [
 ];
 export const N = PIECES.length;
 
-// Corners to fit per shape (triangle = 3, quads = 4).
-export const SHAPE_VERTS = { triangle: 3, square: 4, parallelogram: 4 };
+// Number of points in the resampled boundary polygon for every piece,
+// regardless of shape. Evenly spaced by arc length around the traced outer
+// perimeter. Higher = smoother outline / more clip-path detail, at a small
+// per-frame cost (resampling + lerp + clip-path drawing all scale with this).
+// 48-64 is plenty for tangram-piece-sized overlays; rarely worth going past
+// 100 since the visual smoothness gain flattens out well before then.
+export const BOUNDARY_N = 64;
 
 // Hull-vertex smoothing factor (lerp toward the new shape each frame).
 export const LERP = 0.3;

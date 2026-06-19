@@ -1,6 +1,11 @@
 // ── geometry ──────────────────────────────────────────────────────────────────
-// Pure polygon helpers: convex hull, k-corner fitting, temporally-stable vertex
-// smoothing. No DOM, no shared state.
+// Pure polygon helpers. No DOM, no shared state.
+//
+// convexHull / kgonFromHull are kept here unused for now (the corner-fitting
+// approach they implement had a structural ambiguity for square-ish shapes —
+// see tracker.js's header comment for why detection moved to a boundary-trace
+// + fixed-N resample instead). Delete if you're sure you won't want exact
+// corner identification again later.
 
 // Andrew's monotone-chain convex hull. pts [[x,y]…] → hull [[x,y]…] CCW.
 export function convexHull(pts) {
@@ -26,14 +31,13 @@ export function convexHull(pts) {
 }
 
 // Greedy max-area k-gon chosen from the hull vertices, returned in CCW order so
-// the result is always a simple convex polygon. We know each piece's corner
-// count, so this collapses a wobbly hull to its k defining corners.
+// the result is always a simple convex polygon. Kept for reference / possible
+// future use; not currently called.
 export function kgonFromHull(hull, k) {
   const m = hull.length;
   if (m <= k) return hull.map(p => p.slice());
   const tri2 = (a, b, c) =>
     Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]));
-  // seed with the two farthest-apart vertices (the polygon's diameter)
   let bi = 0, bj = 1, bd = -1;
   for (let i = 0; i < m; i++)
     for (let j = i + 1; j < m; j++) {
@@ -57,32 +61,26 @@ export function kgonFromHull(hull, k) {
     if (best < 0) break;
     idx.push(best);
   }
-  idx.sort((a, b) => a - b);   // preserve convex CCW order
+  idx.sort((a, b) => a - b);
   return idx.map(i => hull[i].slice());
 }
 
-// Smooth `next` toward `prev`, first rotating next's vertex order to the cyclic
-// alignment that best matches prev. Stable correspondence stops corners from
-// swapping identities (and "breathing") between frames.
+// Smooth `next` toward `prev`, index-for-index, no shift search needed.
+//
+// This used to search for the best cyclic rotation aligning next's vertices
+// to prev's, because a small k-gon's vertex order could shift between frames
+// (corners "swapping identity"). That problem doesn't apply here: `next` is
+// always a fixed-N polygon produced by arc-length resampling that's anchored
+// to start near the *same* physical point every frame (see tracker.js's
+// `anchorXY` threading), so index i already means "the same point around the
+// perimeter" frame to frame. A straight per-index lerp is correct and cheap.
 export function matchAndLerp(prev, next, lerp) {
   if (!prev || prev.length !== next.length) return next.map(p => p.slice());
-  const k = next.length;
-  let bestShift = 0, bestCost = Infinity;
-  for (let s = 0; s < k; s++) {
-    let cost = 0;
-    for (let i = 0; i < k; i++) {
-      const n = next[(i + s) % k];
-      const dx = n[0] - prev[i][0], dy = n[1] - prev[i][1];
-      cost += dx * dx + dy * dy;
-    }
-    if (cost < bestCost) { bestCost = cost; bestShift = s; }
-  }
   const out = [];
-  for (let i = 0; i < k; i++) {
-    const n = next[(i + bestShift) % k];
+  for (let i = 0; i < next.length; i++) {
     out.push([
-      prev[i][0] + (n[0] - prev[i][0]) * lerp,
-      prev[i][1] + (n[1] - prev[i][1]) * lerp,
+      prev[i][0] + (next[i][0] - prev[i][0]) * lerp,
+      prev[i][1] + (next[i][1] - prev[i][1]) * lerp,
     ]);
   }
   return out;
