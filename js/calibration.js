@@ -5,9 +5,9 @@ import { PIECES, N, params } from './config.js';
 import { state } from './state.js';
 import { rgb2hsv } from './hsv.js';
 import { mainCanvas, tapHint, crosshair, statusEl, $ } from './dom.js';
-import { readCanvas, readCtx, drawOriented, applyOrientation } from './camera.js';
+import { readCanvas, readCtx, drawOriented } from './camera.js';
 import { pieceMedia } from './media.js';
-import { buildUI, syncSliders, refreshOrientUI } from './ui.js';
+import { buildUI, syncSliders } from './ui.js';
 
 function calibrateAt(clientX, clientY) {
   if (state.calibrating < 0 || !state.running) return;
@@ -38,7 +38,6 @@ function calibrateAt(clientX, clientY) {
   const cal = { h: hs / n, s: ss / n, v: vs / n };
   state.calibrated[state.calibrating] = cal;
   state.smoothHulls[state.calibrating] = null;
-  state.boundaryAnchor[state.calibrating] = null;
   statusEl.textContent =
     `${PIECES[state.calibrating].name} → H=${Math.round(cal.h)}° S=${cal.s.toFixed(2)} V=${cal.v.toFixed(2)}`;
   state.calibrating = -1;
@@ -73,7 +72,6 @@ export function wireCalibration() {
 function getCalData() {
   return {
     htol: params.htol, stol: params.stol, vtol: params.vtol, minArea: params.minArea,
-    rotation: state.rotation, mirror: state.mirror,
     pieces: state.calibrated.map((c, i) => c ? { ...c, name: PIECES[i].name } : null),
   };
 }
@@ -82,15 +80,10 @@ function applyCalData(data) {
   for (const key of ['htol', 'stol', 'vtol', 'minArea'])
     if (data[key] !== undefined) params[key] = data[key];
   syncSliders();
-  if (data.rotation !== undefined) state.rotation = ((data.rotation % 360) + 360) % 360;
-  if (data.mirror   !== undefined) state.mirror = !!data.mirror;
-  refreshOrientUI();
-  if (state.running) applyOrientation();
   if (Array.isArray(data.pieces)) {
     data.pieces.forEach((c, i) => {
       state.calibrated[i] = c ? { h: c.h, s: c.s, v: c.v } : null;
       state.smoothHulls[i] = null;
-      state.boundaryAnchor[i] = null;
     });
   }
   buildUI();
@@ -126,7 +119,6 @@ export function wireSaveLoad() {
     if (!confirm('Clear all calibrations?')) return;
     state.calibrated = Array(N).fill(null);
     state.smoothHulls = Array(N).fill(null);
-    state.boundaryAnchor = Array(N).fill(null);
     $('calName').textContent = '';
     buildUI();
   };

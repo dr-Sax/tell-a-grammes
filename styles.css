@@ -81,5 +81,4 @@ body.immersive #mainCanvas {
 }
 body.immersive #exitFs { display: block; }
 #fsBtn { font-size: 12px; padding: 5px 12px; }
-#rotBtn, #flipBtn { font-size: 12px; padding: 5px 12px; }
 #feedBtn { font-size: 12px; padding: 5px 12px; }

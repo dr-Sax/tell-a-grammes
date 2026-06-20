@@ -1,14 +1,14 @@
 // ── main: orchestration + frame loop ──────────────────────────────────────────
 // Entry point. Wires the modules together and runs the per-frame pipeline.
 
-import { PIECES, N, LERP } from './config.js';
+import { PIECES, N, SHAPE_VERTS, LERP } from './config.js';
 import { state } from './state.js';
 import { matchAndLerp } from './geometry.js';
 import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { computeHSV, detectPiece } from './tracker.js';
 import { drawOverlay, renderDebugBar } from './render.js';
-import { buildUI, syncSliders, wireSliders, wireViewControls, refreshOrientUI } from './ui.js';
+import { buildUI, syncSliders, wireSliders, wireViewControls } from './ui.js';
 import { wireCalibration, wireSaveLoad } from './calibration.js';
 
 function processFrame() {
@@ -32,12 +32,12 @@ function processFrame() {
     const cal = state.calibrated[i];
     if (!cal) continue;
 
-    const found = detectPiece(cal, PW, PH, state.boundaryAnchor[i]);
-    if (!found) { state.smoothHulls[i] = null; state.smoothArea[i] = 0; state.boundaryAnchor[i] = null; continue; }
+    const k = SHAPE_VERTS[PIECES[i].shape] || 4;
+    const found = detectPiece(cal, k, PW, PH);
+    if (!found) { state.smoothHulls[i] = null; state.smoothArea[i] = 0; continue; }
 
     counts[i] = found.filled;
     const poly = found.poly.map(p => [p[0] * scaleX, p[1] * scaleY]);
-    state.boundaryAnchor[i] = found.anchorXY; // proc-space, for next frame's resample start
 
     // stability guard: if this frame's area jumps wildly vs. the running mean
     // it's likely a partial detection (a momentary gap in the border) — mostly
@@ -82,6 +82,5 @@ wireSliders();
 wireViewControls();
 wireCalibration();
 wireSaveLoad();
-refreshOrientUI();
 syncSliders();
 buildUI();

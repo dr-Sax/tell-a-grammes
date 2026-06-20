@@ -1,14 +1,13 @@
 // ── UI: piece rows + view controls ────────────────────────────────────────────
 // Builds the per-piece control rows, wires the tolerance sliders, and the view
-// controls (rotate / flip / feed / fullscreen). Calibration sampling and
-// save/load live in calibration.js.
+// controls (feed / fullscreen). Calibration sampling and save/load live in
+// calibration.js.
 
 import { PIECES, N, params } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
 import { tapHint, crosshair, uiEl, $ } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile } from './media.js';
-import { applyOrientation } from './camera.js';
 
 const SLIDER_KEYS = ['htol', 'stol', 'vtol', 'minArea'];
 
@@ -90,7 +89,6 @@ export function buildUI() {
     clrBtn.onclick = () => {
       state.calibrated[i] = null;
       state.smoothHulls[i] = null;
-      state.boundaryAnchor[i] = null;
       buildUI();
     };
 
@@ -148,12 +146,7 @@ function buildMediaRow(i) {
   return mediaRow;
 }
 
-// ── view controls: rotate / flip / feed / fullscreen ──────────────────────────
-export function refreshOrientUI() {
-  $('rotBtn').textContent = `⟳ ${state.rotation}°`;
-  $('flipBtn').classList.toggle('active', state.mirror);
-}
-
+// ── view controls: feed / fullscreen ──────────────────────────────────────────
 export function wireViewControls() {
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
 
@@ -182,17 +175,6 @@ export function wireViewControls() {
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
 
-  $('rotBtn').onclick = () => {
-    state.rotation = (state.rotation + 90) % 360;
-    if (state.running) applyOrientation();   // swaps canvas dims + resets hulls
-    refreshOrientUI();
-  };
-  $('flipBtn').onclick = () => {
-    state.mirror = !state.mirror;             // draw-time only, no realloc
-    state.smoothHulls = Array(N).fill(null);
-    state.boundaryAnchor = Array(N).fill(null);
-    refreshOrientUI();
-  };
   const feedBtn = $('feedBtn');
   feedBtn.onclick = () => {
     state.showFeed = !state.showFeed;

@@ -9,11 +9,11 @@
 <meta name="apple-mobile-web-app-title" content="Tangram">
 <title>Tangram Tracker</title>
 <link rel="stylesheet" href="styles.css">
-<script type="module" src="js/main.js?v=4"></script>
+<script type="module" src="js/main.js?v=5"></script>
 </head>
 <body>
 <div id="app">
-  <h1>Tell-a-grammes</h1>
+  <h1>Tangram border tracker — pure JS (no OpenCV)</h1>
 
   <div id="canvasWrap">
     <canvas id="mainCanvas"></canvas>
@@ -22,9 +22,9 @@
     <button id="exitFs">✕ exit</button>
   </div>
 
-  <p id="cvStatus">Start Camera and Calibrate Tangram Colors</p>
+  <p id="cvStatus">No external libraries — ready when you are.</p>
   <p id="status"></p>
-  <button id="startBtn">Start Camera</button>
+  <button id="startBtn">Start camera</button>
 
   <div id="controls">
     <div class="ctrl-group">
@@ -50,8 +50,6 @@
     <button id="clearAllBtn" style="font-size:12px; padding:5px 12px; opacity:0.6;">✕ clear all</button>
     <button id="fsBtn">⛶ fullscreen</button>
     <button id="feedBtn">📷 feed on</button>
-    <button id="rotBtn">⟳ 0°</button>
-    <button id="flipBtn">⇋ flip</button>
     <input type="file" id="loadFile" accept=".json" style="display:none">
     <span id="calName" style="font-size:11px; color:#555; align-self:center;"></span>
   </div>

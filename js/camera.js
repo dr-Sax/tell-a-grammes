@@ -1,6 +1,5 @@
-// ── camera + orientation ──────────────────────────────────────────────────────
-// Owns the capture video and the proc-resolution read canvas, plus the shared
-// draw transform (rotation + mirror) used for tracking, display, and taps.
+// ── camera ──────────────────────────────────────────────────────────────────
+// Owns the capture video and the proc-resolution read canvas.
 
 import { PROC_TARGET_W, N } from './config.js';
 import { state } from './state.js';
@@ -13,26 +12,15 @@ video.autoplay = true; video.playsInline = true; video.muted = true;
 export const readCanvas = document.createElement('canvas');
 export const readCtx = readCanvas.getContext('2d', { willReadFrequently: true });
 
-// Draw the video into ctx (sized dw×dh) applying the current rotation + mirror.
+// Draw the video into ctx (sized dw×dh).
 export function drawOriented(ctx, dw, dh) {
-  const swap = (state.rotation === 90 || state.rotation === 270);
-  const bw = swap ? dh : dw;   // un-rotated footprint to draw the source into
-  const bh = swap ? dw : dh;
-  ctx.save();
-  ctx.translate(dw / 2, dh / 2);
-  ctx.rotate(state.rotation * Math.PI / 180);
-  if (state.mirror) ctx.scale(-1, 1);
-  ctx.drawImage(video, -bw / 2, -bh / 2, bw, bh);
-  ctx.restore();
+  ctx.drawImage(video, 0, 0, dw, dh);
 }
 
-// (Re)size canvases + buffers for the current rotation. Returns proc dims.
+// (Re)size canvases + buffers. Returns proc dims.
 export function applyOrientation() {
-  const VW = video.videoWidth  || 640;
-  const VH = video.videoHeight || 480;
-  const swap = (state.rotation === 90 || state.rotation === 270);
-  const MW = swap ? VH : VW;
-  const MH = swap ? VW : VH;
+  const MW = video.videoWidth  || 640;
+  const MH = video.videoHeight || 480;
   mainCanvas.width = MW;
   mainCanvas.height = MH;
   const procScale = Math.min(1, PROC_TARGET_W / MW);
@@ -41,9 +29,8 @@ export function applyOrientation() {
   readCanvas.width = PW;
   readCanvas.height = PH;
   allocBuffers(PW, PH);
-  state.smoothHulls = Array(N).fill(null);     // coordinate space changed
+  state.smoothHulls = Array(N).fill(null);  // coordinate space changed
   state.smoothArea  = Array(N).fill(0);
-  state.boundaryAnchor = Array(N).fill(null);  // proc-space anchor is now stale too
   return { PW, PH };
 }
 

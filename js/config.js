@@ -15,6 +15,7 @@ export const PIECES = [
   { name: 'Piece 6', color: '#7755dd', shape: 'square' },
   { name: 'Piece 7', color: '#cc44aa', shape: 'parallelogram' },
 ];
+
 export const N = PIECES.length;
 
 // Number of points in the resampled boundary polygon for every piece,
