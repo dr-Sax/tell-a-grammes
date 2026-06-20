@@ -11,5 +11,14 @@ export const state = {
   smoothHulls: Array(N).fill(null), // smoothed polygon per piece, canvas px
   smoothArea: Array(N).fill(0),     // running mean filled area, proc px
 
+  // Per-piece caption clock. This is "elapsed seconds while this piece was
+  // detected" — it advances only on frames where the piece is found, and is
+  // left untouched (not reset, not advanced) on dropout frames. The active
+  // word is looked up against this counter, never wall-clock time. See
+  // main.js for the advance and media.js for the cue lookup.
+  captionElapsed: Array(N).fill(0),
+
+  lastFrameTime: 0,  // previous frame's rAF timestamp (ms) for delta-time
+
   showFeed: true,     // camera feed vs. white lightbox behind overlays
 };

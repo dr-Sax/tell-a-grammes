@@ -47,3 +47,19 @@ export const params = {
 };
 
 export const SHAPE_VERTS = { triangle: 3, square: 4, parallelogram: 4 };
+
+// Caption rendering (timed-word overlays — the third per-piece media type).
+// Single line, scale-to-fit inside the detected bounding box. These are the
+// only dials for the look; the timing model lives in main.js (per-piece
+// "detected-time" clock) and the cue lookup lives in media.js.
+export const CAPTION = {
+  fontWeight: 700,
+  fontFamily: 'system-ui, sans-serif',
+  widthFrac:  0.86,  // word is scaled to fill this fraction of the bbox width…
+  heightFrac: 0.55,  // …but never taller than this fraction of the bbox height
+  washAlpha:  0.40,  // piece-colour background drawn behind the word
+  fill:       '#ffffff',          // word colour
+  stroke:     'rgba(0,0,0,0.85)', // outline so it reads on feed OR white
+  strokeFrac: 0.08,  // outline width as a fraction of the font size
+  minPx:      8,     // never render the word smaller than this
+};

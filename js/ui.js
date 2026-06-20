@@ -109,21 +109,34 @@ function buildMediaRow(i) {
   if (m) {
     if (m.type === 'image') {
       thumb.src = m.el.src;
-    } else {
+    } else if (m.type === 'video') {
       const tc = document.createElement('canvas');
       tc.width = 40; tc.height = 28;
       try { tc.getContext('2d').drawImage(m.el, 0, 0, 40, 28); } catch (e) {}
+      thumb.src = tc.toDataURL();
+    } else if (m.type === 'captions') {
+      // No frame to thumbnail — draw a "CC" badge so it's visually distinct.
+      const tc = document.createElement('canvas');
+      tc.width = 40; tc.height = 28;
+      const c = tc.getContext('2d');
+      c.fillStyle = '#16202e'; c.fillRect(0, 0, 40, 28);
+      c.fillStyle = '#7ab8f5';
+      c.font = '700 13px system-ui, sans-serif';
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText('CC', 20, 15);
       thumb.src = tc.toDataURL();
     }
   }
 
   const nameEl = document.createElement('span');
   nameEl.className = 'media-name';
-  nameEl.textContent = m ? m.name : 'no media';
+  nameEl.textContent = m
+    ? (m.type === 'captions' ? `${m.name} · ${m.cues.length}w` : m.name)
+    : 'no media';
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  fileInput.accept = 'image/*,video/*';
+  fileInput.accept = 'image/*,video/*,.json,application/json';
   fileInput.style.display = 'none';
   fileInput.onchange = e => {
     const file = e.target.files[0];

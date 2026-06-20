@@ -11,8 +11,16 @@ import { drawOverlay, renderDebugBar } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls } from './ui.js';
 import { wireCalibration, wireSaveLoad } from './calibration.js';
 
-function processFrame() {
+function processFrame(now) {
   if (!state.running) return;
+
+  // Delta-time for the per-piece caption clocks. rAF passes a DOMHighResTimeStamp
+  // (same origin as performance.now); the very first call comes in argument-less
+  // from the start handler, so fall back. Clamp so a backgrounded tab — where
+  // rAF stalls and resumes with a huge gap — can't skip the captions ahead.
+  const t = (typeof now === 'number') ? now : performance.now();
+  const dt = state.lastFrameTime ? Math.min(0.25, (t - state.lastFrameTime) / 1000) : 0;
+  state.lastFrameTime = t;
 
   const PW = readCanvas.width, PH = readCanvas.height;
   const MW = mainCanvas.width, MH = mainCanvas.height;
@@ -35,6 +43,12 @@ function processFrame() {
     const k = SHAPE_VERTS[PIECES[i].shape] || 4;
     const found = detectPiece(cal, k, PW, PH);
     if (!found) { state.smoothHulls[i] = null; state.smoothArea[i] = 0; continue; }
+
+    // Detected this frame → advance this piece's caption clock. Pieces that
+    // weren't found hit the `continue` above, so their clock is left untouched
+    // (pause-on-dropout, resume-from-the-same-word). Uncalibrated pieces never
+    // reach here either. This is the whole sync model for captions.
+    state.captionElapsed[i] += dt;
 
     counts[i] = found.filled;
     const poly = found.poly.map(p => [p[0] * scaleX, p[1] * scaleY]);
@@ -63,6 +77,7 @@ startBtn.onclick = async () => {
     statusEl.textContent = 'Requesting camera…';
     const { PW, PH } = await startCamera();
     state.running = true;
+    state.lastFrameTime = 0;  // first frame computes dt=0, no startup jump
     startBtn.style.display = 'none';
     controlsEl.style.display = 'flex';
     calControls.style.display = 'flex';

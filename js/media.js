@@ -1,10 +1,13 @@
 // ── piece media ───────────────────────────────────────────────────────────────
-// Per-piece image/video overlays and the iOS-safe file-loading paths.
+// Per-piece image / video / captions overlays and the iOS-safe loading paths.
 
 import { N, PIECES } from './config.js';
 import { statusEl } from './dom.js';
+import { state } from './state.js';
 
-// per piece: { type:'image'|'video', el, url, name } or null
+// per piece: { type:'image'|'video'|'captions', el, url, name, cues? } or null
+//   image/video → el is the <img>/<video>; url is the object URL (video only)
+//   captions    → el/url are null; cues is a time-sorted [{ t, text }] array
 export const pieceMedia = Array(N).fill(null);
 
 export function disposeMedia(i) {
@@ -15,12 +18,45 @@ export function disposeMedia(i) {
   pieceMedia[i] = null;
 }
 
+// Parse the flat {"<seconds>": "<word or phrase>"} caption dict into a
+// time-sorted array [{ t, text }]. JSON object key order is not guaranteed
+// across producers, so sorting by t is required, not optional.
+function parseCues(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const cues = [];
+  for (const key of Object.keys(raw)) {
+    const t = parseFloat(key);
+    if (!Number.isFinite(t)) continue;
+    cues.push({ t, text: String(raw[key]) });
+  }
+  cues.sort((a, b) => a.t - b.t);
+  return cues;
+}
+
+// Active word for a captions attachment at `elapsed` seconds: the last cue
+// whose timestamp is <= elapsed (binary search). Returns null before the first
+// cue's timestamp. There are no end times by design — the final word holds
+// forever once reached, and every moment after the first cue has a word.
+export function activeCaption(media, elapsed) {
+  if (!media || media.type !== 'captions') return null;
+  const cues = media.cues;
+  let lo = 0, hi = cues.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (cues[mid].t <= elapsed) { ans = mid; lo = mid + 1; }
+    else                        { hi = mid - 1; }
+  }
+  return ans >= 0 ? cues[ans].text : null;
+}
+
 // Load a picked file onto piece i. `refresh` is invoked (e.g. buildUI) whenever
 // the attachment changes, so the UI can re-render its thumbnail.
 export function loadMediaFile(i, file, refresh) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
-  const isVideo = file.type.startsWith('video/') ||
-                  ['mov', 'mp4', 'm4v', 'webm', 'ogv', '3gp', 'avi'].includes(ext);
+  const isCaptions = ext === 'json' || file.type === 'application/json';
+  const isVideo = !isCaptions && (
+                  file.type.startsWith('video/') ||
+                  ['mov', 'mp4', 'm4v', 'webm', 'ogv', '3gp', 'avi'].includes(ext));
 
   const setMedia = (type, el, url) => {
     disposeMedia(i);
@@ -28,6 +64,27 @@ export function loadMediaFile(i, file, refresh) {
     statusEl.textContent = `${PIECES[i].name}: ${type} attached`;
     refresh();
   };
+
+  if (isCaptions) {
+    // Captions: read as text, parse to time-sorted cues. No object URL, no
+    // media element — just the cue list. Attaching resets this piece's caption
+    // clock so playback starts from the top of the track.
+    const reader = new FileReader();
+    reader.onload = () => {
+      let cues;
+      try { cues = parseCues(JSON.parse(reader.result)); }
+      catch (e) { statusEl.textContent = `${PIECES[i].name}: couldn't parse captions JSON`; return; }
+      if (!cues.length) { statusEl.textContent = `${PIECES[i].name}: no caption cues in that JSON`; return; }
+      disposeMedia(i);
+      pieceMedia[i] = { type: 'captions', el: null, url: null, name: file.name, cues };
+      state.captionElapsed[i] = 0;
+      statusEl.textContent = `${PIECES[i].name}: captions attached (${cues.length} cues)`;
+      refresh();
+    };
+    reader.onerror = () => { statusEl.textContent = 'Could not read that file'; };
+    reader.readAsText(file);
+    return;
+  }
 
   if (isVideo) {
     // blob: URL attached via a <source> child — the iOS-safe path (src-attribute
