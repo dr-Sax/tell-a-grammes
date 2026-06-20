@@ -45,3 +45,5 @@ export const params = {
   vtol: 35,    // value tolerance on 0-255 (÷255 = fraction)
   minArea: 80, // min connected-component area in proc px (a ring is small)
 };
+
+export const SHAPE_VERTS = { triangle: 3, square: 4, parallelogram: 4 };
