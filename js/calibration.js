@@ -5,7 +5,7 @@ import { PIECES, N, params } from './config.js';
 import { state } from './state.js';
 import { rgb2hsv } from './hsv.js';
 import { mainCanvas, tapHint, crosshair, statusEl, $ } from './dom.js';
-import { readCanvas, readCtx, drawOriented } from './camera.js';
+import { readCanvas, readCtx, drawOriented, video } from './camera.js';
 import { pieceMedia } from './media.js';
 import { buildUI, syncSliders } from './ui.js';
 
@@ -46,6 +46,12 @@ function calibrateAt(clientX, clientY) {
   buildUI();
 }
 
+// Any tap is a user gesture — use it to make sure the iOS camera stream is
+// still playing (it can get suspended mid-session). Runs even while calibrating.
+function keepCameraLive() {
+  if (video.paused) video.play().catch(() => {});
+}
+
 export function wireCalibration() {
   mainCanvas.addEventListener('mousemove', e => {
     if (state.calibrating < 0) return;
@@ -56,13 +62,15 @@ export function wireCalibration() {
   mainCanvas.addEventListener('click', e => calibrateAt(e.clientX, e.clientY));
   // touch: tap to calibrate without firing a synthetic mouse scroll
   mainCanvas.addEventListener('touchend', e => {
+    keepCameraLive();
     if (state.calibrating < 0) return;
     e.preventDefault();
     const t = e.changedTouches[0];
     if (t) calibrateAt(t.clientX, t.clientY);
   }, { passive: false });
-  // resume any autoplay-blocked piece videos on a canvas tap (iOS safety net)
+  // keep the camera live + resume any autoplay-blocked piece videos on tap
   mainCanvas.addEventListener('pointerdown', () => {
+    keepCameraLive();
     if (state.calibrating >= 0) return;
     for (const m of pieceMedia) if (m && m.type === 'video' && m.el.paused) m.el.play().catch(() => {});
   });

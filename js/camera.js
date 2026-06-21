@@ -8,6 +8,18 @@ import { mainCanvas } from './dom.js';
 
 export const video = document.createElement('video');
 video.autoplay = true; video.playsInline = true; video.muted = true;
+video.setAttribute('playsinline', '');
+video.setAttribute('webkit-playsinline', '');
+
+// iOS won't reliably decode frames from a <video> that isn't in the DOM — it
+// plays briefly then suspends, which reads as a frozen feed (the draw loop
+// keeps running, the video just stops producing new frames). Keep it in the
+// document, tiny and effectively invisible, exactly like the piece videos.
+video.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+document.body.appendChild(video);
+
+// Belt-and-suspenders: if iOS suspends the live stream anyway, resume it.
+video.addEventListener('pause', () => { if (video.srcObject) video.play().catch(() => {}); });
 
 export const readCanvas = document.createElement('canvas');
 export const readCtx = readCanvas.getContext('2d', { willReadFrequently: true });

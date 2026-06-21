@@ -128,7 +128,8 @@ function buildMediaRow(i) {
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  fileInput.accept = 'image/*,video/*,.json,application/json';
+  // No accept filter: iOS greys out .json in its Files picker when image/video
+  // types are also listed. Allow everything; loadMediaFile classifies by type/ext.
   fileInput.style.display = 'none';
   fileInput.onchange = e => {
     const file = e.target.files[0];
