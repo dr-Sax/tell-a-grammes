@@ -1,7 +1,7 @@
 // ── main: orchestration + frame loop ──────────────────────────────────────────
 // Entry point. Wires the modules together and runs the per-frame pipeline.
 
-import { PIECES, N, SHAPE_VERTS, LERP } from './config.js';
+import { PIECES, N, LERP } from './config.js';
 import { state } from './state.js';
 import { matchAndLerp } from './geometry.js';
 import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls } from './dom.js';
@@ -40,8 +40,7 @@ function processFrame(now) {
     const cal = state.calibrated[i];
     if (!cal) continue;
 
-    const k = SHAPE_VERTS[PIECES[i].shape] || 4;
-    const found = detectPiece(cal, k, PW, PH);
+    const found = detectPiece(cal, PW, PH);
     if (!found) { state.smoothHulls[i] = null; state.smoothArea[i] = 0; continue; }
 
     // Detected this frame → advance this piece's caption clock. Pieces that

@@ -8,6 +8,7 @@ import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
 import { tapHint, crosshair, uiEl, $ } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile } from './media.js';
+import { captionThumbURL } from './caption.js';
 
 const SLIDER_KEYS = ['htol', 'stol', 'vtol', 'minArea'];
 
@@ -115,16 +116,7 @@ function buildMediaRow(i) {
       try { tc.getContext('2d').drawImage(m.el, 0, 0, 40, 28); } catch (e) {}
       thumb.src = tc.toDataURL();
     } else if (m.type === 'captions') {
-      // No frame to thumbnail — draw a "CC" badge so it's visually distinct.
-      const tc = document.createElement('canvas');
-      tc.width = 40; tc.height = 28;
-      const c = tc.getContext('2d');
-      c.fillStyle = '#16202e'; c.fillRect(0, 0, 40, 28);
-      c.fillStyle = '#7ab8f5';
-      c.font = '700 13px system-ui, sans-serif';
-      c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.fillText('CC', 20, 15);
-      thumb.src = tc.toDataURL();
+      thumb.src = captionThumbURL();
     }
   }
 
