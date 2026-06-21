@@ -7,8 +7,8 @@
 
 import { state } from './state.js';
 
-const WIDTH_FRAC  = 0.86;  // word fills this fraction of the bbox width…
-const HEIGHT_FRAC = 0.55;  // …but is never taller than this fraction of it
+const WIDTH_FRAC  = 0.50;  // word fills this fraction of the bbox width…
+const HEIGHT_FRAC = 0.50;  // …but is never taller than this fraction of it
 const FONT = px => `700 ${px}px system-ui, sans-serif`;
 
 // {"<seconds>": "<word>"} → time-sorted [{ t, text }]. JSON key order isn't
