@@ -1,0 +1,17 @@
+# ── nixpacks.toml ─────────────────────────────────────────────────────────────
+# Static ES-module app served by Caddy on Railway, with per-deploy cache
+# busting. Build phase stamps ?v=<commit> onto every module URL
+# (stamp-version.mjs); start phase serves the stamped files with Caddy using
+# the repo's Caddyfile. No npm dependencies — the stamper uses only Node
+# built-ins — so there's no install step.
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "caddy"]
+
+[phases.build]
+# Railway provides RAILWAY_GIT_COMMIT_SHA, which the stamper reads as the
+# version, so the stamp changes exactly once per deploy.
+cmds = ["node stamp-version.mjs"]
+
+[start]
+cmd = "caddy run --config Caddyfile --adapter caddyfile"
