@@ -148,11 +148,12 @@ function buildMediaRow(i) {
   return mediaRow;
 }
 
-// ── view controls: rotate / flip / feed / fullscreen ──────────────────────────
-export function refreshOrientUI() {
-  $('rotBtn').textContent = `⟳ ${state.rotation}°`;
-  $('flipBtn').classList.toggle('active', state.mirror);
-}
+// ── view controls: feed / fullscreen ──────────────────────────────────────────
+// Rotation/mirror were stripped from this project. `refreshOrientUI` is kept as
+// a no-op only so any leftover import/call (e.g. in main.js/calibration.js) won't
+// throw — it does nothing and restores no orientation behaviour. Safe to delete
+// once nothing imports it.
+export function refreshOrientUI() {}
 
 export function wireViewControls() {
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
@@ -182,16 +183,6 @@ export function wireViewControls() {
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
 
-  $('rotBtn').onclick = () => {
-    state.rotation = (state.rotation + 90) % 360;
-    if (state.running) applyOrientation();   // swaps canvas dims + resets hulls
-    refreshOrientUI();
-  };
-  $('flipBtn').onclick = () => {
-    state.mirror = !state.mirror;             // draw-time only, no realloc
-    state.smoothHulls = Array(N).fill(null);
-    refreshOrientUI();
-  };
   const feedBtn = $('feedBtn');
   feedBtn.onclick = () => {
     state.showFeed = !state.showFeed;
