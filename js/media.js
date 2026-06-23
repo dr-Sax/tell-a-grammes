@@ -1,16 +1,20 @@
 // ── piece media ───────────────────────────────────────────────────────────────
-// Per-piece image/video overlays and the iOS-safe file-loading paths.
+// Per-piece image/video/gif overlays and the iOS-safe file-loading paths.
 
 import { N, PIECES } from './config.js';
 import { statusEl } from './dom.js';
 import { isGif, loadGif } from './gif.js';
 
-// per piece: { type:'image'|'video'|'gif', el, url, name } or null
+// per piece: { type:'image'|'video'|'gif', el, url, name, stop? } or null
+//   el   — a drawImage-able source (Image, video, or gif's offscreen canvas)
+//   url  — object URL to revoke on dispose (video only; null otherwise)
+//   stop — timer-halt fn (gif only; stops frame compositing on dispose)
 export const pieceMedia = Array(N).fill(null);
 
 export function disposeMedia(i) {
   const m = pieceMedia[i];
   if (!m) return;
+  if (m.stop) m.stop();                                   // halt gif frame timer
   if (m.url) URL.revokeObjectURL(m.url);
   if (m.type === 'video') { try { m.el.pause(); m.el.remove(); } catch (e) {} }
   pieceMedia[i] = null;
@@ -23,19 +27,20 @@ export function loadMediaFile(i, file, refresh) {
   const isVideo = file.type.startsWith('video/') ||
                   ['mov', 'mp4', 'm4v', 'webm', 'ogv', '3gp', 'avi'].includes(ext);
 
-  const setMedia = (type, el, url) => {
+  // `extra` carries type-specific fields (e.g. gif's stop fn) onto the record.
+  const setMedia = (type, el, url, extra = {}) => {
     disposeMedia(i);
-    pieceMedia[i] = { type, el, url, name: file.name };
+    pieceMedia[i] = { type, el, url, name: file.name, ...extra };
     statusEl.textContent = `${PIECES[i].name}: ${type} attached`;
     refresh();
   };
 
-  // GIFs: delegate to the gif module
+  // GIFs: decode + animate via the gif module (returns an offscreen canvas).
   if (isGif(file)) {
     loadGif(file)
-      .then(({ el, type }) => setMedia(type, el, null))
+      .then(({ el, stop }) => setMedia('gif', el, null, { stop }))
       .catch(err => {
-        statusEl.textContent = `GIF failed: ${err.message}`;
+        statusEl.textContent = `GIF failed: ${err.message || err}`;
       });
     return;
   }

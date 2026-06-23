@@ -27,8 +27,10 @@ export function drawOverlay(hull, i, MW, MH) {
     const xs = hull.map(p => p[0]), ys = hull.map(p => p[1]);
     const bx = Math.min(...xs), by = Math.min(...ys);
     const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
-    const mw = media.el.videoWidth  || media.el.naturalWidth  || 1;
-    const mh = media.el.videoHeight || media.el.naturalHeight || 1;
+    // gif's source is an offscreen <canvas> (.width/.height); image/video expose
+    // naturalWidth/videoWidth — fall through to whichever the element has.
+    const mw = media.el.videoWidth  || media.el.naturalWidth  || media.el.width  || 1;
+    const mh = media.el.videoHeight || media.el.naturalHeight || media.el.height || 1;
     const scale = Math.max(bw / mw, bh / mh);
     const dw = mw * scale, dh = mh * scale;
     const dx = bx + (bw - dw) / 2, dy = by + (bh - dh) / 2;

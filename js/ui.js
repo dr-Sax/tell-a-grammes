@@ -108,10 +108,10 @@ function buildMediaRow(i) {
   thumb.className = 'media-thumb' + (m ? ' on' : '');
   thumb.id = `thumb${i}`;
   if (m) {
-    if (m.type === 'image' || m.type === 'gif') {
-      // Images and GIFs: use the data URL directly (GIFs animate in thumbnail too)
+    if (m.type === 'image') {
       thumb.src = m.el.src;
     } else {
+      // video or gif: el is a video/canvas — snapshot the current frame
       const tc = document.createElement('canvas');
       tc.width = 40; tc.height = 28;
       try { tc.getContext('2d').drawImage(m.el, 0, 0, 40, 28); } catch (e) {}
