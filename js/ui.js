@@ -1,14 +1,14 @@
 // ── UI: piece rows + view controls ────────────────────────────────────────────
 // Builds the per-piece control rows, wires the tolerance sliders, and the view
-// controls (feed / fullscreen). Calibration sampling and save/load live in
-// calibration.js.
+// controls (rotate / flip / feed / fullscreen). Calibration sampling and
+// save/load live in calibration.js.
 
 import { PIECES, N, params } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
 import { tapHint, crosshair, uiEl, $ } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile } from './media.js';
-import { captionThumbURL } from './caption.js';
+import { applyOrientation } from './camera.js';
 
 const SLIDER_KEYS = ['htol', 'stol', 'vtol', 'minArea'];
 
@@ -108,28 +108,24 @@ function buildMediaRow(i) {
   thumb.className = 'media-thumb' + (m ? ' on' : '');
   thumb.id = `thumb${i}`;
   if (m) {
-    if (m.type === 'image') {
+    if (m.type === 'image' || m.type === 'gif') {
+      // Images and GIFs: use the data URL directly (GIFs animate in thumbnail too)
       thumb.src = m.el.src;
-    } else if (m.type === 'video') {
+    } else {
       const tc = document.createElement('canvas');
       tc.width = 40; tc.height = 28;
       try { tc.getContext('2d').drawImage(m.el, 0, 0, 40, 28); } catch (e) {}
       thumb.src = tc.toDataURL();
-    } else if (m.type === 'captions') {
-      thumb.src = captionThumbURL();
     }
   }
 
   const nameEl = document.createElement('span');
   nameEl.className = 'media-name';
-  nameEl.textContent = m
-    ? (m.type === 'captions' ? `${m.name} · ${m.cues.length}w` : m.name)
-    : 'no media';
+  nameEl.textContent = m ? m.name : 'no media';
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  // No accept filter: iOS greys out .json in its Files picker when image/video
-  // types are also listed. Allow everything; loadMediaFile classifies by type/ext.
+  fileInput.accept = 'image/*,video/*';
   fileInput.style.display = 'none';
   fileInput.onchange = e => {
     const file = e.target.files[0];
@@ -152,7 +148,12 @@ function buildMediaRow(i) {
   return mediaRow;
 }
 
-// ── view controls: feed / fullscreen ──────────────────────────────────────────
+// ── view controls: rotate / flip / feed / fullscreen ──────────────────────────
+export function refreshOrientUI() {
+  $('rotBtn').textContent = `⟳ ${state.rotation}°`;
+  $('flipBtn').classList.toggle('active', state.mirror);
+}
+
 export function wireViewControls() {
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
 
@@ -181,6 +182,16 @@ export function wireViewControls() {
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
 
+  $('rotBtn').onclick = () => {
+    state.rotation = (state.rotation + 90) % 360;
+    if (state.running) applyOrientation();   // swaps canvas dims + resets hulls
+    refreshOrientUI();
+  };
+  $('flipBtn').onclick = () => {
+    state.mirror = !state.mirror;             // draw-time only, no realloc
+    state.smoothHulls = Array(N).fill(null);
+    refreshOrientUI();
+  };
   const feedBtn = $('feedBtn');
   feedBtn.onclick = () => {
     state.showFeed = !state.showFeed;
