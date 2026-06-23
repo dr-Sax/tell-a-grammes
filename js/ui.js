@@ -1,14 +1,14 @@
 // ── UI: piece rows + view controls ────────────────────────────────────────────
 // Builds the per-piece control rows, wires the tolerance sliders, and the view
-// controls (rotate / flip / feed / fullscreen). Calibration sampling and
-// save/load live in calibration.js.
+// controls (feed / fullscreen). Calibration sampling and save/load live in
+// calibration.js.
 
 import { PIECES, N, params } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
 import { tapHint, crosshair, uiEl, $ } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile } from './media.js';
-import { applyOrientation } from './camera.js';
+import { captionThumbURL } from './caption.js';
 
 const SLIDER_KEYS = ['htol', 'stol', 'vtol', 'minArea'];
 
@@ -110,6 +110,9 @@ function buildMediaRow(i) {
   if (m) {
     if (m.type === 'image') {
       thumb.src = m.el.src;
+    } else if (m.type === 'caption') {
+      // captions have no frame — show a "CC" badge instead
+      thumb.src = captionThumbURL();
     } else {
       // video or gif: el is a video/canvas — snapshot the current frame
       const tc = document.createElement('canvas');
@@ -125,7 +128,9 @@ function buildMediaRow(i) {
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  fileInput.accept = 'image/*,video/*';
+  // image/video frames + JSON caption cue files. The explicit .json extension
+  // is needed alongside the MIME type so iOS Safari's picker doesn't grey it out.
+  fileInput.accept = 'image/*,video/*,application/json,.json';
   fileInput.style.display = 'none';
   fileInput.onchange = e => {
     const file = e.target.files[0];
@@ -149,12 +154,6 @@ function buildMediaRow(i) {
 }
 
 // ── view controls: feed / fullscreen ──────────────────────────────────────────
-// Rotation/mirror were stripped from this project. `refreshOrientUI` is kept as
-// a no-op only so any leftover import/call (e.g. in main.js/calibration.js) won't
-// throw — it does nothing and restores no orientation behaviour. Safe to delete
-// once nothing imports it.
-export function refreshOrientUI() {}
-
 export function wireViewControls() {
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
 

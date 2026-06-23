@@ -1,14 +1,17 @@
 // ── piece media ───────────────────────────────────────────────────────────────
-// Per-piece image/video/gif overlays and the iOS-safe file-loading paths.
+// Per-piece image/video/gif/caption overlays and the iOS-safe file-loading paths.
 
 import { N, PIECES } from './config.js';
+import { state } from './state.js';
 import { statusEl } from './dom.js';
 import { isGif, loadGif } from './gif.js';
+import { parseCues } from './caption.js';
 
-// per piece: { type:'image'|'video'|'gif', el, url, name, stop? } or null
-//   el   — a drawImage-able source (Image, video, or gif's offscreen canvas)
-//   url  — object URL to revoke on dispose (video only; null otherwise)
-//   stop — timer-halt fn (gif only; stops frame compositing on dispose)
+// per piece: { type:'image'|'video'|'gif'|'caption', el, url, name, stop?, cues? } or null
+//   el    — a drawImage-able source (Image, video, or gif's offscreen canvas); none for captions
+//   url   — object URL to revoke on dispose (video only; null otherwise)
+//   stop  — timer-halt fn (gif only; stops frame compositing on dispose)
+//   cues  — time-sorted [{ t, text }] (caption only)
 export const pieceMedia = Array(N).fill(null);
 
 export function disposeMedia(i) {
@@ -26,14 +29,35 @@ export function loadMediaFile(i, file, refresh) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   const isVideo = file.type.startsWith('video/') ||
                   ['mov', 'mp4', 'm4v', 'webm', 'ogv', '3gp', 'avi'].includes(ext);
+  const isCaption = file.type === 'application/json' || ext === 'json';
 
-  // `extra` carries type-specific fields (e.g. gif's stop fn) onto the record.
+  // `extra` carries type-specific fields (gif's stop fn, caption's cues) onto the record.
   const setMedia = (type, el, url, extra = {}) => {
     disposeMedia(i);
     pieceMedia[i] = { type, el, url, name: file.name, ...extra };
     statusEl.textContent = `${PIECES[i].name}: ${type} attached`;
     refresh();
   };
+
+  // Captions: a JSON cue file { "<seconds>": "<word>" }. No frame — just the
+  // parsed cues. Reset this piece's caption clock so playback starts at the
+  // first cue; the clock then advances only on detected frames (see main.js).
+  if (isCaption) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const cues = parseCues(JSON.parse(reader.result));
+        if (!cues.length) { statusEl.textContent = 'No valid cues in that JSON'; return; }
+        setMedia('caption', null, null, { cues });
+        state.captionElapsed[i] = 0;
+      } catch (err) {
+        statusEl.textContent = 'Failed to parse caption JSON';
+      }
+    };
+    reader.onerror = () => { statusEl.textContent = 'Could not read that file'; };
+    reader.readAsText(file);
+    return;
+  }
 
   // GIFs: decode + animate via the gif module (returns an offscreen canvas).
   if (isGif(file)) {

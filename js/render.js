@@ -7,11 +7,17 @@ import { hsvToHex } from './hsv.js';
 import { state } from './state.js';
 import { mainCtx, debugBar } from './dom.js';
 import { pieceMedia } from './media.js';
+import { drawCaption } from './caption.js';
 
 export function drawOverlay(hull, i, MW, MH) {
   if (!hull || hull.length < 3) return;
   const cal = state.calibrated[i];
   const color = hsvToHex(cal.h, cal.s, cal.v);
+
+  // polygon bounding box — used by both the image fit and the caption layout
+  const xs = hull.map(p => p[0]), ys = hull.map(p => p[1]);
+  const bx = Math.min(...xs), by = Math.min(...ys);
+  const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
 
   // clip to the piece polygon
   mainCtx.save();
@@ -22,11 +28,14 @@ export function drawOverlay(hull, i, MW, MH) {
   mainCtx.clip();
 
   const media = pieceMedia[i];
-  // GIFs and images always render; videos only render when playing
-  if (media && (media.type === 'image' || media.type === 'gif' || (media.type === 'video' && !media.el.paused))) {
-    const xs = hull.map(p => p[0]), ys = hull.map(p => p[1]);
-    const bx = Math.min(...xs), by = Math.min(...ys);
-    const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+  // images + gifs always render; videos only while actually playing. Captions
+  // are NOT drawable frames — they fall through to the colour wash, then paint
+  // their word on top (handled after this block).
+  const drawableFrame = media &&
+    (media.type === 'image' || media.type === 'gif' ||
+     (media.type === 'video' && !media.el.paused));
+
+  if (drawableFrame) {
     // gif's source is an offscreen <canvas> (.width/.height); image/video expose
     // naturalWidth/videoWidth — fall through to whichever the element has.
     const mw = media.el.videoWidth  || media.el.naturalWidth  || media.el.width  || 1;
@@ -43,6 +52,14 @@ export function drawOverlay(hull, i, MW, MH) {
     mainCtx.fillRect(0, 0, MW, MH);
     mainCtx.globalAlpha = 1;
   }
+
+  // caption word on top of the wash, still inside the polygon clip. The active
+  // word is keyed off state.captionElapsed[i] (advanced in main.js only on
+  // detected frames), so a piece's captions pause when it leaves frame.
+  if (media && media.type === 'caption') {
+    drawCaption(mainCtx, media.cues, i, bx, by, bw, bh);
+  }
+
   mainCtx.restore();
 
   // outline
