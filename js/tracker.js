@@ -10,6 +10,8 @@ let Hc, Sc, Vc;            // per-pixel HSV (Float32: H 0-360, S/V 0-1)
 let maskA, maskB, maskC;   // binary scratch masks (Uint8)
 let labels, labelStack;    // connected-component labels + flood-fill stack
 
+const SMOOTH_ITERS = 1;    // 3-point outline smoothing passes (0 = off)
+
 export function allocBuffers(w, h) {
   const n = w * h;
   Hc = new Float32Array(n); Sc = new Float32Array(n); Vc = new Float32Array(n);
@@ -35,9 +37,18 @@ export function computeHSV(img, count) {
 
 function buildMask(cal, count) {
   const hT = params.htol * 2, sT = params.stol / 255, vT = params.vtol / 255;
+  // Hue is the discriminating, lighting-stable channel, so it stays a tight
+  // symmetric gate. Saturation and value drift with surface shading and gloss,
+  // so they are one-sided FLOORS, not symmetric windows: any pixel of the right
+  // hue that's at least roughly as saturated and bright as the calibrated sample
+  // counts. This captures vivid highlights, the mid-tone, and shaded regions as
+  // one piece — a fuller, less flickery ring — while the floors still reject the
+  // white background (low S) and the dark hole (low V). Raising the S/V sliders
+  // lowers the floors (more tolerance); the upper side is intentionally open.
+  const sFloor = cal.s - sT, vFloor = cal.v - vT;
   for (let p = 0; p < count; p++) {
     let dh = Math.abs(Hc[p] - cal.h) % 360; if (dh > 180) dh = 360 - dh;
-    maskA[p] = (dh <= hT && Math.abs(Sc[p] - cal.s) <= sT && Math.abs(Vc[p] - cal.v) <= vT) ? 1 : 0;
+    maskA[p] = (dh <= hT && Sc[p] >= sFloor && Vc[p] >= vFloor) ? 1 : 0;
   }
 }
 
@@ -162,6 +173,25 @@ function resampleByArcLength(trace, n) {
   return out;
 }
 
+// Light spatial smoothing of the closed outline: a 3-point circular moving
+// average that rounds off the single-pixel jaggies left by the integer Moore
+// trace. Index-stable resampling means neighbours are adjacent perimeter points,
+// so this is just (prev+cur+next)/3 around the loop. matchAndLerp (in main.js)
+// smooths across frames; this smooths within a frame — together they calm the
+// overlay far more than either alone.
+function smoothClosed(pts, iters) {
+  let cur = pts;
+  for (let it = 0; it < iters; it++) {
+    const n = cur.length, out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = cur[(i - 1 + n) % n], b = cur[i], c = cur[(i + 1) % n];
+      out[i] = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3];
+    }
+    cur = out;
+  }
+  return cur;
+}
+
 // Full per-piece pipeline. Returns { poly, filled } or null.
 // computeHSV must have been called for this frame first.
 export function detectPiece(cal, w, h) {
@@ -173,7 +203,7 @@ export function detectPiece(cal, w, h) {
   const trace = traceBoundary(blob.label, blob.start, w, h);
   if (trace.length < 3) return null;
 
-  const poly = resampleByArcLength(trace, BOUNDARY_N);
+  const poly = smoothClosed(resampleByArcLength(trace, BOUNDARY_N), SMOOTH_ITERS);
   return { poly, filled: blob.area };
 }
 
