@@ -1,13 +1,11 @@
-// ── calibration: colour sampling + auto-detect + save/load ────────────────────
-// Tap-to-sample a piece's border colour, auto-detect all colours at once, and
-// persist/restore the full setup.
+// ── calibration: colour sampling + save/load ──────────────────────────────────
+// Tap-to-sample a piece's border colour, and persist/restore the full setup.
 
 import { PIECES, N, params } from './config.js';
 import { state } from './state.js';
 import { rgb2hsv } from './hsv.js';
 import { mainCanvas, tapHint, crosshair, statusEl, $ } from './dom.js';
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
-import { computeHSV, detectDominantColors } from './tracker.js';
 import { pieceMedia } from './media.js';
 import { buildUI, syncSliders } from './ui.js';
 
@@ -76,34 +74,6 @@ export function wireCalibration() {
     if (state.calibrating >= 0) return;
     for (const m of pieceMedia) if (m && m.type === 'video' && m.el.paused) m.el.play().catch(() => {});
   });
-}
-
-// ── auto-calibrate ──────────────────────────────────────────────────────────
-// Grab a fresh frame, find the N most prominent border colours, and assign them
-// to pieces in hue order. Best run with the feed OFF (white background) so only
-// the borders are saturated. Fully automatic — overwrites all calibrations.
-export function wireAutoCalibrate() {
-  $('autoCalBtn').onclick = () => {
-    if (!state.running) return;
-    const PW = readCanvas.width, PH = readCanvas.height;
-    drawOriented(readCtx, PW, PH);
-    computeHSV(readCtx.getImageData(0, 0, PW, PH).data, PW * PH);
-
-    const found = detectDominantColors(PW, PH, N);
-    for (let i = 0; i < N; i++) {
-      state.calibrated[i] = found[i] ? { h: found[i].h, s: found[i].s, v: found[i].v } : null;
-      state.smoothHulls[i] = null;
-      state.smoothArea[i]  = 0;
-    }
-    state.calibrating = -1;
-    tapHint.style.display = 'none';
-    crosshair.style.display = 'none';
-
-    statusEl.textContent = found.length >= N
-      ? `Auto-detected ${found.length} colours, sorted by hue`
-      : `Auto-detected ${found.length} of ${N} — turn the feed off and retry, or tap the rest`;
-    buildUI();
-  };
 }
 
 // ── save / load ───────────────────────────────────────────────────────────────

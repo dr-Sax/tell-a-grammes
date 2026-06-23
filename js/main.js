@@ -9,7 +9,7 @@ import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { computeHSV, detectPiece } from './tracker.js';
 import { drawOverlay, renderDebugBar } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls } from './ui.js';
-import { wireCalibration, wireAutoCalibrate, wireSaveLoad } from './calibration.js';
+import { wireCalibration, wireSaveLoad } from './calibration.js';
 
 function processFrame(now) {
   if (!state.running) return;
@@ -81,7 +81,7 @@ startBtn.onclick = async () => {
     controlsEl.style.display = 'flex';
     calControls.style.display = 'flex';
     cvStatusEl.textContent = `Running at ${PW}×${PH} proc res — pure JS`;
-    statusEl.textContent = 'Tip: turn feed off (white), then auto-detect or tap each piece border';
+    statusEl.textContent = 'Tip: turn feed off (white), then calibrate by tapping each piece border';
     buildUI();
     processFrame();
   } catch (e) {
@@ -95,7 +95,6 @@ startBtn.onclick = async () => {
 wireSliders();
 wireViewControls();
 wireCalibration();
-wireAutoCalibrate();
 wireSaveLoad();
 syncSliders();
 buildUI();

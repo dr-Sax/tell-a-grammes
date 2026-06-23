@@ -71,11 +71,16 @@ function morphClose(w, h, r) {
   morphPass(maskB, maskA, maskC, w, h, r, true);
 }
 
-// flood-fill label maskA; return { label, area } for the largest blob over minA
+// Flood-fill label maskA; return { label, area, start } for the largest blob
+// over minA. `start` is the blob's seed pixel — the first pixel of that label
+// hit in row-major order, i.e. its topmost-leftmost pixel, which is always on
+// the outer boundary and is therefore a valid traceBoundary start. (This used
+// to be recovered by a second full-frame scan in findStart; recording it here
+// makes that scan unnecessary.)
 function largestBlob(w, h, minA) {
   const n = w * h;
   labels.fill(0);
-  let cur = 0, bestLabel = 0, bestArea = minA;
+  let cur = 0, bestLabel = 0, bestArea = minA, bestStart = -1;
   for (let s = 0; s < n; s++) {
     if (!maskA[s] || labels[s]) continue;
     cur++;
@@ -97,9 +102,9 @@ function largestBlob(w, h, minA) {
         }
       }
     }
-    if (area > bestArea) { bestArea = area; bestLabel = cur; }
+    if (area > bestArea) { bestArea = area; bestLabel = cur; bestStart = s; }
   }
-  return bestLabel ? { label: bestLabel, area: bestArea } : null;
+  return bestLabel ? { label: bestLabel, area: bestArea, start: bestStart } : null;
 }
 
 // Moore-neighbor offsets, CCW starting East. Tracing the outer boundary this
@@ -128,30 +133,18 @@ function traceBoundary(label, startIdx, w, h) {
   return pts;
 }
 
-function findStart(label, w, h) {
-  for (let s = 0, n = w * h; s < n; s++) if (labels[s] === label) return s;
-  return -1;
-}
-
-// Resample the trace to n points, evenly spaced by arc length, starting near
-// `anchorXY` (last frame's point 0) so point index stays stable frame to
-// frame even as raw trace length varies.
-function resampleByArcLength(trace, n, anchorXY) {
+// Resample the trace to n points, evenly spaced by arc length. The trace always
+// starts at the blob's topmost-leftmost pixel (see largestBlob), so point index
+// is already stable frame to frame without any anchor search — index i means
+// "the same point around the perimeter" every frame, which is what lets the
+// straight per-index lerp in geometry.js's matchAndLerp be correct.
+function resampleByArcLength(trace, n) {
   const m = trace.length;
   if (m < 3) return trace.map(p => p.slice());
 
-  let startI = 0;
-  if (anchorXY) {
-    let bestD = Infinity;
-    for (let i = 0; i < m; i++) {
-      const dx = trace[i][0] - anchorXY[0], dy = trace[i][1] - anchorXY[1], d = dx * dx + dy * dy;
-      if (d < bestD) { bestD = d; startI = i; }
-    }
-  }
-
   const cum = new Float64Array(m + 1);
   for (let i = 0; i < m; i++) {
-    const a = trace[(startI + i) % m], b = trace[(startI + i + 1) % m];
+    const a = trace[i], b = trace[(i + 1) % m];
     cum[i + 1] = cum[i] + Math.hypot(b[0] - a[0], b[1] - a[1]);
   }
   const total = cum[m];
@@ -164,25 +157,23 @@ function resampleByArcLength(trace, n, anchorXY) {
     while (seg < m - 1 && cum[seg + 1] < target) seg++;
     const segLen = cum[seg + 1] - cum[seg];
     const t = segLen > 0 ? (target - cum[seg]) / segLen : 0;
-    const a = trace[(startI + seg) % m], b = trace[(startI + seg + 1) % m];
+    const a = trace[seg], b = trace[(seg + 1) % m];
     out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
   }
   return out;
 }
 
-// Full per-piece pipeline. Returns { poly, filled, anchorXY } or null.
+// Full per-piece pipeline. Returns { poly, filled } or null.
 // computeHSV must have been called for this frame first.
-export function detectPiece(cal, w, h, anchorXY) {
+export function detectPiece(cal, w, h) {
   buildMask(cal, w * h);
   morphClose(w, h, CLOSE_R);
   const blob = largestBlob(w, h, params.minArea);
   if (!blob) return null;
 
-  const startIdx = findStart(blob.label, w, h);
-  if (startIdx < 0) return null;
-  const trace = traceBoundary(blob.label, startIdx, w, h);
+  const trace = traceBoundary(blob.label, blob.start, w, h);
   if (trace.length < 3) return null;
 
-  const poly = resampleByArcLength(trace, BOUNDARY_N, anchorXY);
-  return { poly, filled: blob.area, anchorXY: poly[0] };
+  const poly = resampleByArcLength(trace, BOUNDARY_N);
+  return { poly, filled: blob.area };
 }
