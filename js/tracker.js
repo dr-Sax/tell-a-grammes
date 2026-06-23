@@ -1,7 +1,10 @@
 // ── tracker: pixels → polygon ─────────────────────────────────────────────────
 // Per-piece detection: calibrated colour → boundary trace → fixed-N polygon.
+// Also hosts auto-calibration (dominant-colour extraction) since it reads the
+// same HSV buffers.
 
 import { params, CLOSE_R, BOUNDARY_N } from './config.js';
+import { hueDiff360 } from './hsv.js';
 
 let Hc, Sc, Vc;            // per-pixel HSV (Float32: H 0-360, S/V 0-1)
 let maskA, maskB, maskC;   // binary scratch masks (Uint8)
@@ -74,9 +77,7 @@ function morphClose(w, h, r) {
 // Flood-fill label maskA; return { label, area, start } for the largest blob
 // over minA. `start` is the blob's seed pixel — the first pixel of that label
 // hit in row-major order, i.e. its topmost-leftmost pixel, which is always on
-// the outer boundary and is therefore a valid traceBoundary start. (This used
-// to be recovered by a second full-frame scan in findStart; recording it here
-// makes that scan unnecessary.)
+// the outer boundary and is therefore a valid traceBoundary start.
 function largestBlob(w, h, minA) {
   const n = w * h;
   labels.fill(0);
@@ -135,9 +136,7 @@ function traceBoundary(label, startIdx, w, h) {
 
 // Resample the trace to n points, evenly spaced by arc length. The trace always
 // starts at the blob's topmost-leftmost pixel (see largestBlob), so point index
-// is already stable frame to frame without any anchor search — index i means
-// "the same point around the perimeter" every frame, which is what lets the
-// straight per-index lerp in geometry.js's matchAndLerp be correct.
+// is already stable frame to frame without any anchor search.
 function resampleByArcLength(trace, n) {
   const m = trace.length;
   if (m < 3) return trace.map(p => p.slice());
@@ -176,4 +175,74 @@ export function detectPiece(cal, w, h) {
 
   const poly = resampleByArcLength(trace, BOUNDARY_N);
   return { poly, filled: blob.area };
+}
+
+// ── auto-calibration: dominant border colours from the HSV buffer ─────────────
+// Assumes computeHSV ran for the current frame. With the feed OFF (white
+// lightbox) the only saturated pixels are the piece borders, so a saturation-
+// weighted hue histogram is effectively a histogram of border colours. Returns
+// up to k {h,s,v} sorted by hue; fewer if there aren't k distinct colours.
+const AC_MIN_S = 0.2;   // ignore the white background / desaturated noise
+const AC_MIN_V = 0.15;  // ignore the dark holes
+const AC_BINS  = 90;    // hue histogram resolution (4° per bin)
+
+export function detectDominantColors(w, h, k) {
+  const count = w * h;
+  const binW = 360 / AC_BINS;
+
+  // saturation-weighted hue histogram over qualifying pixels
+  const hist = new Float32Array(AC_BINS);
+  let total = 0;
+  for (let p = 0; p < count; p++) {
+    const s = Sc[p];
+    if (s < AC_MIN_S || Vc[p] < AC_MIN_V) continue;
+    let b = (Hc[p] / binW) | 0; if (b >= AC_BINS) b = AC_BINS - 1;
+    hist[b] += s; total += s;
+  }
+  if (total <= 0) return [];
+
+  // circular box-blur (radius 1) so one colour spread across adjacent bins
+  // reads as a single peak
+  const sm = new Float32Array(AC_BINS);
+  for (let i = 0; i < AC_BINS; i++)
+    sm[i] = hist[(i - 1 + AC_BINS) % AC_BINS] + hist[i] + hist[(i + 1) % AC_BINS];
+
+  // peak-find by non-max suppression. A peak must clear a small share of total
+  // weight (rejects glare specks); suppress a ±(htol·2)° window around each so
+  // the next peak is a genuinely different colour (same threshold the conflict
+  // warning and detection use).
+  const floor = total * 0.02;
+  const supBins = Math.max(1, Math.round((params.htol * 2) / binW));
+  const work = sm.slice();
+  const peakBins = [];
+  for (let n = 0; n < k; n++) {
+    let bi = -1, bv = floor;
+    for (let i = 0; i < AC_BINS; i++) if (work[i] > bv) { bv = work[i]; bi = i; }
+    if (bi < 0) break;
+    peakBins.push(bi);
+    for (let d = -supBins; d <= supBins; d++) work[(bi + d + AC_BINS) % AC_BINS] = 0;
+  }
+
+  // refine each peak to a real {h,s,v}: circular (vector) mean of the pixels
+  // within the hue window, so a window straddling 0°/360° averages correctly.
+  const win = params.htol * 2;
+  const out = [];
+  for (const bi of peakBins) {
+    const peakHue = (bi + 0.5) * binW;
+    let sumSin = 0, sumCos = 0, sumS = 0, sumV = 0, nn = 0;
+    for (let p = 0; p < count; p++) {
+      const s = Sc[p], v = Vc[p];
+      if (s < AC_MIN_S || v < AC_MIN_V) continue;
+      if (hueDiff360(Hc[p], peakHue) > win) continue;
+      const rad = Hc[p] * Math.PI / 180;
+      sumSin += Math.sin(rad) * s; sumCos += Math.cos(rad) * s;
+      sumS += s; sumV += v; nn++;
+    }
+    if (nn < 4) continue;
+    let hue = Math.atan2(sumSin, sumCos) * 180 / Math.PI;
+    if (hue < 0) hue += 360;
+    out.push({ h: hue, s: sumS / nn, v: sumV / nn });
+  }
+  out.sort((a, b) => a.h - b.h);
+  return out;
 }
