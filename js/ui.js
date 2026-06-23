@@ -10,19 +10,6 @@ import { tapHint, crosshair, uiEl, $ } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile } from './media.js';
 import { captionThumbURL } from './caption.js';
 
-// Tiny DOM builder. `props` keys map to element properties (className, onclick,
-// textContent, src, disabled…); `style` is special-cased to Object.assign onto
-// the inline style. Remaining args are children (skipped if null/undefined).
-function el(tag, props = {}, ...kids) {
-  const n = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === 'style') Object.assign(n.style, v);
-    else n[k] = v;
-  }
-  for (const k of kids) if (k != null) n.append(k);
-  return n;
-}
-
 const SLIDER_KEYS = ['htol', 'stol', 'vtol', 'minArea'];
 
 export function wireSliders() {
@@ -54,14 +41,22 @@ function conflictsWith(i) {
 export function buildUI() {
   uiEl.innerHTML = '';
   PIECES.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'piece-row';
+
+    const main = document.createElement('div');
+    main.className = 'piece-main';
+
     const cal = state.calibrated[i];
 
-    const sw = el('div', { className: 'swatch', style: {
-      background: cal ? hsvToHex(cal.h, cal.s, cal.v) : p.color,
-      opacity: cal ? '1' : '0.35',
-    }});
+    const sw = document.createElement('div');
+    sw.className = 'swatch';
+    sw.style.background = cal ? hsvToHex(cal.h, cal.s, cal.v) : p.color;
+    sw.style.opacity = cal ? '1' : '0.35';
 
-    const lbl = el('span', { className: 'piece-label', textContent: p.name });
+    const lbl = document.createElement('span');
+    lbl.className = 'piece-label';
+    lbl.textContent = p.name;
     const conflict = conflictsWith(i);
     if (conflict !== null) {
       const dist = Math.round(hueDiff360(cal.h, state.calibrated[conflict].h));
@@ -69,43 +64,55 @@ export function buildUI() {
       lbl.style.color = '#c84';
     }
 
-    const stats = el('span', { className: 'piece-stats',
-      textContent: cal ? `H${Math.round(cal.h)}° S${cal.s.toFixed(2)}` : '—' });
+    const stats = document.createElement('span');
+    stats.className = 'piece-stats';
+    stats.textContent = cal ? `H${Math.round(cal.h)}° S${cal.s.toFixed(2)}` : '—';
 
-    const calBtn = el('button', {
-      className: 'cal-btn' + (state.calibrating === i ? ' active' : '') + (cal ? ' done' : ''),
-      textContent: cal ? '✓ recal' : 'calibrate',
-      disabled: !state.running,
-      onclick: () => {
-        state.calibrating = state.calibrating === i ? -1 : i;
-        const on = state.calibrating >= 0;
-        tapHint.style.display   = on ? 'block' : 'none';
-        crosshair.style.display = on ? 'block' : 'none';
-        tapHint.textContent = on ? `Tap the colored BORDER of ${PIECES[state.calibrating].name}` : '';
-        buildUI();
-      },
-    });
+    const calBtn = document.createElement('button');
+    calBtn.className = 'cal-btn' +
+      (state.calibrating === i ? ' active' : '') + (cal ? ' done' : '');
+    calBtn.textContent = cal ? '✓ recal' : 'calibrate';
+    calBtn.disabled = !state.running;
+    calBtn.onclick = () => {
+      state.calibrating = state.calibrating === i ? -1 : i;
+      const on = state.calibrating >= 0;
+      tapHint.style.display   = on ? 'block' : 'none';
+      crosshair.style.display = on ? 'block' : 'none';
+      tapHint.textContent = on ? `Tap the colored BORDER of ${PIECES[state.calibrating].name}` : '';
+      buildUI();
+    };
 
-    const clrBtn = el('button', {
-      className: 'clear-btn', textContent: '✕', title: 'Clear calibration',
-      disabled: !cal,
-      onclick: () => { state.calibrated[i] = null; state.smoothHulls[i] = null; buildUI(); },
-    });
+    const clrBtn = document.createElement('button');
+    clrBtn.className = 'clear-btn';
+    clrBtn.textContent = '✕';
+    clrBtn.title = 'Clear calibration';
+    clrBtn.disabled = !cal;
+    clrBtn.onclick = () => {
+      state.calibrated[i] = null;
+      state.smoothHulls[i] = null;
+      buildUI();
+    };
 
-    const main = el('div', { className: 'piece-main' }, sw, lbl, stats, calBtn, clrBtn);
-    uiEl.appendChild(el('div', { className: 'piece-row' }, main, buildMediaRow(i)));
+    main.append(sw, lbl, stats, calBtn, clrBtn);
+    row.append(main, buildMediaRow(i));
+    uiEl.appendChild(row);
   });
 }
 
 function buildMediaRow(i) {
+  const mediaRow = document.createElement('div');
+  mediaRow.className = 'piece-media';
   const m = pieceMedia[i];
 
-  const thumb = el('img', { className: 'media-thumb' + (m ? ' on' : ''), id: `thumb${i}` });
+  const thumb = document.createElement('img');
+  thumb.className = 'media-thumb' + (m ? ' on' : '');
+  thumb.id = `thumb${i}`;
   if (m) {
     if (m.type === 'image') {
       thumb.src = m.el.src;
     } else if (m.type === 'caption') {
-      thumb.src = captionThumbURL();          // captions have no frame — "CC" badge
+      // captions have no frame — show a "CC" badge instead
+      thumb.src = captionThumbURL();
     } else {
       // video or gif: el is a video/canvas — snapshot the current frame
       const tc = document.createElement('canvas');
@@ -115,32 +122,35 @@ function buildMediaRow(i) {
     }
   }
 
+  const nameEl = document.createElement('span');
+  nameEl.className = 'media-name';
+  nameEl.textContent = m ? m.name : 'no media';
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
   // image/video frames + JSON caption cue files. The explicit .json extension
   // is needed alongside the MIME type so iOS Safari's picker doesn't grey it out.
-  const fileInput = el('input', {
-    type: 'file',
-    accept: 'image/*,video/*,application/json,.json',
-    style: { display: 'none' },
-    onchange: e => {
-      const file = e.target.files[0];
-      if (file) loadMediaFile(i, file, buildUI);
-      e.target.value = '';
-    },
-  });
+  fileInput.accept = 'image/*,video/*,application/json,.json';
+  fileInput.style.display = 'none';
+  fileInput.onchange = e => {
+    const file = e.target.files[0];
+    if (file) loadMediaFile(i, file, buildUI);
+    e.target.value = '';
+  };
 
-  const nameEl = el('span', { className: 'media-name', textContent: m ? m.name : 'no media' });
+  const upBtn = document.createElement('button');
+  upBtn.className = 'upload-btn';
+  upBtn.textContent = m ? '⟳ swap' : '+ media';
+  upBtn.onclick = () => fileInput.click();
 
-  const upBtn = el('button', {
-    className: 'upload-btn', textContent: m ? '⟳ swap' : '+ media',
-    onclick: () => fileInput.click(),
-  });
+  const clrMediaBtn = document.createElement('button');
+  clrMediaBtn.className = 'clear-media-btn';
+  clrMediaBtn.textContent = '✕';
+  clrMediaBtn.disabled = !m;
+  clrMediaBtn.onclick = () => { disposeMedia(i); buildUI(); };
 
-  const clrMediaBtn = el('button', {
-    className: 'clear-media-btn', textContent: '✕', disabled: !m,
-    onclick: () => { disposeMedia(i); buildUI(); },
-  });
-
-  return el('div', { className: 'piece-media' }, thumb, nameEl, fileInput, upBtn, clrMediaBtn);
+  mediaRow.append(thumb, nameEl, fileInput, upBtn, clrMediaBtn);
+  return mediaRow;
 }
 
 // ── view controls: feed / fullscreen ──────────────────────────────────────────
