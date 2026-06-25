@@ -2,7 +2,7 @@
 // The single mutable hub for per-session / per-frame state. Mutate its
 // properties (never reassign the export) so every importer sees one object.
 
-import { N } from './config.js';
+import {N, MEDIA_SLIDERS} from './config.js';
 
 export const state = {
   running: false,
@@ -17,6 +17,12 @@ export const state = {
   // word is looked up against this counter, never wall-clock time. See
   // main.js for the advance and media.js for the cue lookup.
   captionElapsed: Array(N).fill(0),
+
+  // Per-piece media framing. One independent object per piece (built from
+  // MEDIA_SLIDERS defaults). Mutated in place by the ui sliders; read fresh by
+  // render.js each frame, which is what makes the sliders feel real-time.
+  mediaAdjust: Array.from({ length: N }, () =>
+    Object.fromEntries(MEDIA_SLIDERS.map(s => [s.key, s.def]))),
 
   lastFrameTime: 0,  // previous frame's rAF timestamp (ms) for delta-time
 

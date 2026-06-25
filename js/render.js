@@ -34,15 +34,17 @@ export function drawOverlay(hull, i, MW, MH) {
   const drawableFrame = media &&
     (media.type === 'image' || media.type === 'gif' ||
      (media.type === 'video' && !media.el.paused));
+  
+  const adj = state.mediaAdjust[i];
 
   if (drawableFrame) {
     // gif's source is an offscreen <canvas> (.width/.height); image/video expose
     // naturalWidth/videoWidth — fall through to whichever the element has.
     const mw = media.el.videoWidth  || media.el.naturalWidth  || media.el.width  || 1;
     const mh = media.el.videoHeight || media.el.naturalHeight || media.el.height || 1;
-    const scale = Math.max(bw / mw, bh / mh);
+    const scale = Math.max(bw / mw, bh / mh) * adj.zoom;
     const dw = mw * scale, dh = mh * scale;
-    const dx = bx + (bw - dw) / 2, dy = by + (bh - dh) / 2;
+    const dx = bx + (bw - dw) / 2 + adj.xshift * bw, dy = by + (bh - dh) / 2 + adj.yshift * bh;
     mainCtx.globalAlpha = 0.92;
     mainCtx.drawImage(media.el, dx, dy, dw, dh);
     mainCtx.globalAlpha = 1;
@@ -57,7 +59,7 @@ export function drawOverlay(hull, i, MW, MH) {
   // word is keyed off state.captionElapsed[i] (advanced in main.js only on
   // detected frames), so a piece's captions pause when it leaves frame.
   if (media && media.type === 'caption') {
-    drawCaption(mainCtx, media.cues, i, bx, by, bw, bh);
+    drawCaption(mainCtx, media.cues, i, bx, by, bw, bh, adj);
   }
 
   mainCtx.restore();

@@ -35,23 +35,25 @@ export function captionWord(cues, elapsed) {
 // Draw piece i's active word into its bounding box, centred + scaled to fit a
 // single line. `ctx` is already clipped to the piece polygon and the colour
 // wash already painted by the caller.
-export function drawCaption(ctx, cues, i, bx, by, bw, bh) {
+export function drawCaption(ctx, cues, i, bx, by, bw, bh, adj = { zoom: 1, xshift: 0, yshift: 0 }) {
   const word = captionWord(cues, state.captionElapsed[i]);
   if (!word) return;
 
   ctx.font = FONT(100);                       // measure at a fixed size, scale result
   const tw = ctx.measureText(word).width || 1;
-  const px = Math.max(8, 100 * Math.min(bw * WIDTH_FRAC / tw, bh * HEIGHT_FRAC / 100));
-
+  const px = Math.max(8, 100 * Math.min(bw * WIDTH_FRAC / tw, bh * HEIGHT_FRAC / 100) * adj.zoom);
+  const cx = bx + bw / 2 + adj.xshift * bw;
+  const cy = by + bh / 2 + adj.yshift * bh;
+  
   ctx.font = FONT(px);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
   ctx.lineWidth = Math.max(2, px * 0.08);
   ctx.strokeStyle = 'rgba(0,0,0,0.85)';        // outline so it reads on feed or white
-  ctx.strokeText(word, bx + bw / 2, by + bh / 2);
+  ctx.strokeText(word, cx, cy);
   ctx.fillStyle = '#fff';
-  ctx.fillText(word, bx + bw / 2, by + bh / 2);
+  ctx.fillText(word, cx, cy);
 }
 
 // "CC" badge data URL for the media-row thumbnail (captions have no frame).

@@ -3,7 +3,7 @@
 // controls (feed / fullscreen). Calibration sampling and save/load live in
 // calibration.js.
 
-import { PIECES, N, params } from './config.js';
+import { PIECES, N, params, MEDIA_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
 import { tapHint, crosshair, uiEl, $ } from './dom.js';
@@ -99,6 +99,41 @@ export function buildUI() {
   });
 }
 
+// Per-piece framing sliders (zoom / x-shift / y-shift). Mutates the piece's
+// state.mediaAdjust object IN PLACE on input — the rAF loop reads it next frame,
+// so changes are immediate. Never calls buildUI (that would interrupt the drag).
+function buildAdjustRow(i) {
+  const row = document.createElement('div');
+  row.className = 'piece-adjust';
+  const adj = state.mediaAdjust[i];
+
+  for (const s of MEDIA_SLIDERS) {
+    const group = document.createElement('label');
+    group.className = 'adjust-group';
+
+    const tag = document.createElement('span');
+    tag.className = 'adjust-tag';
+    tag.textContent = s.label;
+    tag.title = 'reset';
+    tag.onclick = () => { adj[s.key] = s.def; range.value = s.def; val.textContent = (+s.def).toFixed(2); };
+
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = s.min; range.max = s.max; range.step = s.step;
+    range.value = adj[s.key];
+
+    const val = document.createElement('span');
+    val.className = 'adjust-val';
+    val.textContent = (+adj[s.key]).toFixed(2);
+
+    range.oninput = () => { adj[s.key] = +range.value; val.textContent = (+range.value).toFixed(2); };
+
+    group.append(tag, range, val);
+    row.appendChild(group);
+  }
+  return row;
+}
+
 function buildMediaRow(i) {
   const mediaRow = document.createElement('div');
   mediaRow.className = 'piece-media';
@@ -150,7 +185,11 @@ function buildMediaRow(i) {
   clrMediaBtn.onclick = () => { disposeMedia(i); buildUI(); };
 
   mediaRow.append(thumb, nameEl, fileInput, upBtn, clrMediaBtn);
-  return mediaRow;
+  if (!m) return mediaRow;
+
+  const wrap = document.createElement('div');
+  wrap.append(mediaRow, buildAdjustRow(i));
+  return wrap;
 }
 
 // ── view controls: feed / fullscreen ──────────────────────────────────────────
