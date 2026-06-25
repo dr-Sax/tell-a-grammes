@@ -38,16 +38,16 @@ export function drawOverlay(hull, i, MW, MH) {
   const adj = state.mediaAdjust[i];
 
   if (drawableFrame) {
-    // gif's source is an offscreen <canvas> (.width/.height); image/video expose
-    // naturalWidth/videoWidth — fall through to whichever the element has.
     const mw = media.el.videoWidth  || media.el.naturalWidth  || media.el.width  || 1;
     const mh = media.el.videoHeight || media.el.naturalHeight || media.el.height || 1;
     const scale = Math.max(bw / mw, bh / mh) * adj.zoom;
     const dw = mw * scale, dh = mh * scale;
-    const dx = bx + (bw - dw) / 2 + adj.xshift * bw, dy = by + (bh - dh) / 2 + adj.yshift * bh;
+    const cx = bx + bw / 2 + adj.xshift * bw;
+    const cy = by + bh / 2 + adj.yshift * bh;
     mainCtx.globalAlpha = 0.92;
-    mainCtx.drawImage(media.el, dx, dy, dw, dh);
-    mainCtx.globalAlpha = 1;
+    mainCtx.translate(cx, cy);
+    mainCtx.rotate(adj.rotate * Math.PI / 180);
+    mainCtx.drawImage(media.el, -dw / 2, -dh / 2, dw, dh);
   } else {
     mainCtx.globalAlpha = 0.45;
     mainCtx.fillStyle = color;

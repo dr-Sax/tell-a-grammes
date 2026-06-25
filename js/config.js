@@ -23,9 +23,10 @@ export const N = PIECES.length;
 // scale; xshift/yshift offset the media centre as a fraction of the tracked
 // piece's bbox (so framing stays anchored as the piece moves and resizes).
 export const MEDIA_SLIDERS = [
-  { key: 'zoom',   label: 'zoom', min: 0.2, max: 5, step: 0.05, def: 1 },
-  { key: 'xshift', label: 'x',    min: -1,  max: 1, step: 0.02, def: 0 },
-  { key: 'yshift', label: 'y',    min: -1,  max: 1, step: 0.02, def: 0 },
+  { key: 'zoom',   label: 'zoom', min: 0.2,   max: 5,   step: 0.05, def: 1 },
+  { key: 'rotate', label: 'rot',  min: -180,  max: 180, step: 0.02, def: 0 },
+  { key: 'xshift', label: 'x',    min: -1,    max: 1,   step: 0.02, def: 0 },
+  { key: 'yshift', label: 'y',    min: -1,    max: 1,   step: 0.02, def: 0 },
 ];
 
 // Number of points in the resampled boundary polygon for every piece,
