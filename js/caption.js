@@ -21,9 +21,18 @@ export function parseCues(raw) {
     .sort((a, b) => a.t - b.t);
 }
 
+function loopLength(cues) {
+  if (cues.length < 2) return Infinity;
+  return cues[cues.length - 1].t + 0.5;
+}
+
 // Last cue with t <= elapsed (binary search). null before the first cue; the
 // final word holds forever — there are no end times, by design.
 export function captionWord(cues, elapsed) {
+  if (!cues.length) return null;
+  const period = loopLength(cues);
+  if (Number.isFinite(period) && period > 0) elapsed %= period;
+
   let lo = 0, hi = cues.length - 1, ans = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
