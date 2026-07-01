@@ -28,14 +28,26 @@ function calibrateAt(clientX, clientY) {
 
   // average only saturated/bright pixels — discards the white lightbox and the
   // dark hole, leaving the border colour. Calibrate with the feed off (white).
-  let hs = 0, ss = 0, vs = 0, n = 0;
+  //
+  // Hue is circular (0-360 wraps), so a plain arithmetic mean is wrong for any
+  // colour near the 0°/360° seam — e.g. samples at 355° and 5° should average
+  // to ~0°, but hs/n would give ~180°. Average via sin/cos (circular mean)
+  // instead. This matters a lot for warm/red-magenta paints (like a ~343°
+  // orange), which sit right next to that seam.
+  let sinSum = 0, cosSum = 0, ss = 0, vs = 0, n = 0;
   for (let i = 0; i < data.length; i += 4) {
     const [hh, s, v] = rgb2hsv(data[i], data[i + 1], data[i + 2]);
-    if (s > 0.2 && v > 0.15) { hs += hh; ss += s; vs += v; n++; }
+    if (s > 0.2 && v > 0.15) {
+      const rad = hh * Math.PI / 180;
+      sinSum += Math.sin(rad); cosSum += Math.cos(rad);
+      ss += s; vs += v; n++;
+    }
   }
   if (n < 4) { statusEl.textContent = 'Tap missed — too dark or unsaturated, try again'; return; }
 
-  const cal = { h: hs / n, s: ss / n, v: vs / n };
+  let h = Math.atan2(sinSum, cosSum) * 180 / Math.PI;
+  if (h < 0) h += 360;
+  const cal = { h, s: ss / n, v: vs / n };
   state.calibrated[state.calibrating] = cal;
   state.smoothHulls[state.calibrating] = null;
   statusEl.textContent =
@@ -43,6 +55,7 @@ function calibrateAt(clientX, clientY) {
   state.calibrating = -1;
   tapHint.style.display = 'none';
   crosshair.style.display = 'none';
+  if (readout) readout.style.display = 'none';
   buildUI();
 }
 
@@ -52,12 +65,54 @@ function keepCameraLive() {
   if (video.paused) video.play().catch(() => {});
 }
 
+// Small floating readout that tracks the crosshair while calibrating, so you
+// can see live H/S/V under the cursor before you tap — useful for checking
+// whether a piece's colour is stable across the surface (gloss hotspots will
+// show up as the reading jumping around as you move) and for sanity-checking
+// paints before committing to a tap. Built here rather than in index.html so
+// no markup changes are needed; sampled straight from readCtx, which the main
+// loop is already redrawing every frame — this adds no extra camera reads.
+let readout = null;
+function ensureReadout() {
+  if (readout) return readout;
+  readout = document.createElement('div');
+  readout.style.cssText =
+    'position:fixed;pointer-events:none;z-index:9999;display:none;' +
+    'background:rgba(0,0,0,0.78);color:#fff;font:12px/1.3 monospace;' +
+    'padding:3px 7px;border-radius:4px;white-space:nowrap;transform:translate(14px,-28px);';
+  document.body.appendChild(readout);
+  return readout;
+}
+
+function updateReadout(clientX, clientY) {
+  const el = ensureReadout();
+  const rect = mainCanvas.getBoundingClientRect();
+  const scaleX = readCanvas.width  / rect.width;
+  const scaleY = readCanvas.height / rect.height;
+  const px = Math.round((clientX - rect.left) * scaleX);
+  const py = Math.round((clientY - rect.top)  * scaleY);
+  if (px < 0 || py < 0 || px >= readCanvas.width || py >= readCanvas.height) {
+    el.style.display = 'none';
+    return;
+  }
+  const d = readCtx.getImageData(px, py, 1, 1).data;
+  const [hh, s, v] = rgb2hsv(d[0], d[1], d[2]);
+  el.textContent = `H${Math.round(hh)}° S${s.toFixed(2)} V${v.toFixed(2)}`;
+  el.style.left = clientX + 'px';
+  el.style.top  = clientY + 'px';
+  el.style.display = 'block';
+}
+
 export function wireCalibration() {
   mainCanvas.addEventListener('mousemove', e => {
     if (state.calibrating < 0) return;
     const rect = mainCanvas.getBoundingClientRect();
     crosshair.style.left = (e.clientX - rect.left) + 'px';
     crosshair.style.top  = (e.clientY - rect.top)  + 'px';
+    updateReadout(e.clientX, e.clientY);
+  });
+  mainCanvas.addEventListener('mouseleave', () => {
+    if (readout) readout.style.display = 'none';
   });
   mainCanvas.addEventListener('click', e => calibrateAt(e.clientX, e.clientY));
   // touch: tap to calibrate without firing a synthetic mouse scroll
