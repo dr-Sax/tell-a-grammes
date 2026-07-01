@@ -173,7 +173,10 @@ function buildMediaRow(i) {
   fileInput.style.display = 'none';
   fileInput.onchange = e => {
     const file = e.target.files[0];
-    if (file) loadMediaFile(i, file, buildUI);
+    // loadMediaFile only calls this refresh callback on a SUCCESSFUL attach
+    // (failure paths just set statusEl text) — so closing the panel here means
+    // it collapses right when there's something new to look at, not on errors.
+    if (file) loadMediaFile(i, file, () => { buildUI(); overlayPanel.classList.remove('open'); });
     e.target.value = '';
   };
 
