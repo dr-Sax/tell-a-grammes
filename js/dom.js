@@ -13,6 +13,8 @@ export const controlsEl  = document.getElementById('controls');
 export const calControls = document.getElementById('calControls');
 export const uiEl        = document.getElementById('ui');
 export const debugBar    = document.getElementById('debugBar');
+export const overlayPanel  = document.getElementById('overlayPanel');
+export const panelToggle   = document.getElementById('panelToggle');
 
 // shorthand for the control buttons / sliders owned by feature modules
 export const $ = id => document.getElementById(id);

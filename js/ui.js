@@ -6,7 +6,7 @@
 import { PIECES, N, params, MEDIA_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
-import { tapHint, crosshair, uiEl, $ } from './dom.js';
+import { tapHint, crosshair, uiEl, overlayPanel, panelToggle, $ } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile } from './media.js';
 import { captionThumbURL } from './caption.js';
 
@@ -79,6 +79,10 @@ export function buildUI() {
       tapHint.style.display   = on ? 'block' : 'none';
       crosshair.style.display = on ? 'block' : 'none';
       tapHint.textContent = on ? `Tap the colored BORDER of ${PIECES[state.calibrating].name}` : '';
+      // collapse the panel out of the way while actively calibrating — the
+      // piece needs to be fully visible to tap; reopen it if the button is
+      // pressed again to cancel (calibrateAt reopens it on a successful tap).
+      overlayPanel.classList.toggle('open', !on);
       buildUI();
     };
 
@@ -194,6 +198,8 @@ function buildMediaRow(i) {
 
 // ── view controls: feed / fullscreen ──────────────────────────────────────────
 export function wireViewControls() {
+  panelToggle.onclick = () => overlayPanel.classList.toggle('open');
+
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
 
   const enterImmersive = () => {

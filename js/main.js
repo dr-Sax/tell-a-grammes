@@ -4,7 +4,7 @@
 import { PIECES, N, LERP } from './config.js';
 import { state } from './state.js';
 import { matchAndLerp } from './geometry.js';
-import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls } from './dom.js';
+import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls, panelToggle, overlayPanel } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { computeHSV, detectPiece } from './tracker.js';
 import { drawOverlay, renderDebugBar } from './render.js';
@@ -80,6 +80,8 @@ startBtn.onclick = async () => {
     startBtn.style.display = 'none';
     controlsEl.style.display = 'flex';
     calControls.style.display = 'flex';
+    panelToggle.style.display = 'block';
+    overlayPanel.classList.add('open');
     cvStatusEl.textContent = `Running at ${PW}×${PH} proc res — pure JS`;
     statusEl.textContent = 'Tip: turn feed off (white), then calibrate by tapping each piece border';
     buildUI();

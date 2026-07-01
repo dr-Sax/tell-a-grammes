@@ -19,43 +19,54 @@
     <canvas id="mainCanvas"></canvas>
     <div id="tapHint"></div>
     <div id="crosshair"></div>
+    <p id="status"></p>
     <button id="exitFs">✕ exit</button>
+    <button id="panelToggle">☰ controls</button>
+
+    <!-- Overlay panel: calibration, media, and sliders — lives inside
+         canvasWrap so it stays reachable in immersive/fullscreen mode too
+         (the immersive CSS rule only hides things OUTSIDE canvasWrap, the
+         same trick #exitFs already relied on). Collapses out of the way via
+         panelToggle so it doesn't permanently block the camera view. -->
+    <div id="overlayPanel">
+      <div id="overlayHandle"></div>
+      <div id="overlayScroll">
+        <div id="controls">
+          <div class="ctrl-group">
+            <label>Hue tol <span id="htolVal">9</span></label>
+            <input type="range" id="htolRange" min="4" max="45" value="9" style="flex:1">
+          </div>
+          <div class="ctrl-group">
+            <label>Sat tol <span id="stolVal">48</span></label>
+            <input type="range" id="stolRange" min="10" max="120" value="48" style="flex:1">
+          </div>
+          <div class="ctrl-group">
+            <label>Val tol <span id="vtolVal">35</span></label>
+            <input type="range" id="vtolRange" min="10" max="150" value="35" style="flex:1">
+          </div>
+          <div class="ctrl-group">
+            <label>Min area <span id="minAreaVal">80</span></label>
+            <input type="range" id="minAreaRange" min="20" max="3000" value="80" step="10" style="flex:1">
+          </div>
+        </div>
+        <div id="calControls" style="display:none; gap:6px; padding:4px 0; flex-wrap:wrap;">
+          <button id="saveBtn" style="font-size:12px; padding:5px 12px;">💾 save calibration</button>
+          <button id="loadBtn" style="font-size:12px; padding:5px 12px;">📂 load calibration</button>
+          <button id="clearAllBtn" style="font-size:12px; padding:5px 12px; opacity:0.6;">✕ clear all</button>
+          <button id="fsBtn">⛶ fullscreen</button>
+          <button id="feedBtn">📷 feed on</button>
+          <input type="file" id="loadFile" accept=".json" style="display:none">
+          <span id="calName" style="font-size:11px; color:#555; align-self:center;"></span>
+        </div>
+
+        <div id="debugBar"></div>
+        <div id="ui"></div>
+      </div>
+    </div>
   </div>
 
   <p id="cvStatus">No external libraries — ready when you are.</p>
-  <p id="status"></p>
   <button id="startBtn">Start camera</button>
-
-  <div id="controls">
-    <div class="ctrl-group">
-      <label>Hue tol <span id="htolVal">9</span></label>
-      <input type="range" id="htolRange" min="4" max="45" value="9" style="flex:1">
-    </div>
-    <div class="ctrl-group">
-      <label>Sat tol <span id="stolVal">48</span></label>
-      <input type="range" id="stolRange" min="10" max="120" value="48" style="flex:1">
-    </div>
-    <div class="ctrl-group">
-      <label>Val tol <span id="vtolVal">35</span></label>
-      <input type="range" id="vtolRange" min="10" max="150" value="35" style="flex:1">
-    </div>
-    <div class="ctrl-group">
-      <label>Min area <span id="minAreaVal">80</span></label>
-      <input type="range" id="minAreaRange" min="20" max="3000" value="80" step="10" style="flex:1">
-    </div>
-  </div>
-  <div id="calControls" style="display:none; gap:6px; padding:4px 0; flex-wrap:wrap;">
-    <button id="saveBtn" style="font-size:12px; padding:5px 12px;">💾 save calibration</button>
-    <button id="loadBtn" style="font-size:12px; padding:5px 12px;">📂 load calibration</button>
-    <button id="clearAllBtn" style="font-size:12px; padding:5px 12px; opacity:0.6;">✕ clear all</button>
-    <button id="fsBtn">⛶ fullscreen</button>
-    <button id="feedBtn">📷 feed on</button>
-    <input type="file" id="loadFile" accept=".json" style="display:none">
-    <span id="calName" style="font-size:11px; color:#555; align-self:center;"></span>
-  </div>
-
-  <div id="debugBar"></div>
-  <div id="ui"></div>
 </div>
 </body>
 </html>

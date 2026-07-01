@@ -4,7 +4,7 @@
 import { PIECES, N, params } from './config.js';
 import { state } from './state.js';
 import { rgb2hsv } from './hsv.js';
-import { mainCanvas, tapHint, crosshair, statusEl, $ } from './dom.js';
+import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel, $ } from './dom.js';
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
 import { pieceMedia } from './media.js';
 import { buildUI, syncSliders } from './ui.js';
@@ -56,6 +56,7 @@ function calibrateAt(clientX, clientY) {
   tapHint.style.display = 'none';
   crosshair.style.display = 'none';
   if (readout) readout.style.display = 'none';
+  overlayPanel.classList.add('open');
   buildUI();
 }
 
