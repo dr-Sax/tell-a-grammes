@@ -224,13 +224,24 @@ export function wireViewControls() {
 
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
 
+  // iPhone Safari (16.4+) DOES now support requestFullscreen on arbitrary
+  // elements, but it renders them letterboxed to the element's aspect ratio
+  // at request-time instead of stretching to fill — which shows up as black
+  // bars on the sides in landscape. That's strictly worse than our own
+  // `.immersive` CSS (which fills the viewport via object-fit: cover), so on
+  // iPhone we deliberately skip the native API and rely on the CSS class
+  // only. iPadOS/desktop/Android don't have this letterboxing quirk, so they
+  // still get real fullscreen (hides Safari/Chrome chrome entirely).
+  const isIPhone = /iPhone/.test(navigator.userAgent) ||
+    (/iPad|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1 && screen.height < 900);
+
   const enterImmersive = () => {
     document.body.classList.add('immersive');
-    // Real Fullscreen API where it exists (desktop / Android / iPadOS). iPhone
-    // Safari has none — the CSS class handles layout there.
     const wrap = $('canvasWrap');
-    const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
-    if (req) { try { const p = req.call(wrap); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+    if (!isIPhone) {
+      const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+      if (req) { try { const p = req.call(wrap); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+    }
     setTimeout(() => window.scrollTo(0, 1), 80);  // nudge Safari toolbars to collapse
   };
   const exitImmersive = () => {
