@@ -148,11 +148,20 @@ export function wireCalibration() {
 function getCalData() {
   return {
     htol: params.htol, stol: params.stol, vtol: params.vtol, minArea: params.minArea,
-    pieces: state.calibrated.map((c, i) => {
-      if (!c) return null;
-      const out = { ...c, name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
+    pieces: PIECES.map((_, i) => {
+      const c = state.calibrated[i];
       const m = pieceMedia[i];
-      if (m && m.sourceURL) out.media = { type: m.type, url: m.sourceURL };
+      // export this piece's slot if there's ANYTHING to save for it — colour,
+      // a URL-backed media attachment, or non-default framing. Gating this on
+      // calibration alone (the old behaviour) silently dropped media for any
+      // piece that had media attached but wasn't calibrated yet.
+      const hasMediaURL = m && m.sourceURL;
+      const adjustTouched = MEDIA_SLIDERS.some(s => state.mediaAdjust[i][s.key] !== s.def);
+      if (!c && !hasMediaURL && !adjustTouched) return null;
+
+      const out = { name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
+      if (c) Object.assign(out, { h: c.h, s: c.s, v: c.v });
+      if (hasMediaURL) out.media = { type: m.type, url: m.sourceURL };
       return out;
     }),
   };
@@ -170,7 +179,9 @@ async function applyCalData(data) {
 
   if (Array.isArray(data.pieces)) {
     data.pieces.forEach((c, i) => {
-      state.calibrated[i] = c ? { h: c.h, s: c.s, v: c.v } : null;
+      // a piece entry may now exist for media/framing alone, without colour
+      // data (see getCalData) — only treat it as calibrated if h/s/v are present.
+      state.calibrated[i] = (c && c.h !== undefined) ? { h: c.h, s: c.s, v: c.v } : null;
       state.smoothHulls[i] = null;
       state.lastCentroid[i] = null;
       state.missStreak[i] = 0;
@@ -205,10 +216,12 @@ async function applyCalData(data) {
 export function wireSaveLoad() {
   $('saveBtn').onclick = () => {
     const data = getCalData();
-    // flag calibrated pieces whose media won't be included — attached via a
-    // local file pick, so there's no URL for the saved config to reference.
-    const missing = data.pieces
-      .map((p, i) => (p && pieceMedia[i] && !pieceMedia[i].sourceURL) ? PIECES[i].name : null)
+    // flag ANY piece whose media isn't URL-backed — checked against pieceMedia
+    // directly, not the export data, so this still catches a piece that has
+    // ONLY local media and nothing else exportable (which getCalData omits
+    // entirely, since there'd be nothing to write for it).
+    const missing = PIECES
+      .map((p, i) => (pieceMedia[i] && !pieceMedia[i].sourceURL) ? p.name : null)
       .filter(Boolean);
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -217,9 +230,13 @@ export function wireSaveLoad() {
     a.href = url; a.download = 'tangram-config.json'; a.click();
     URL.revokeObjectURL(url);
 
-    $('calName').textContent = missing.length
-      ? `saved ✓ (media not included for: ${missing.join(', ')} — attach via 🔗 URL to include)`
-      : 'saved ✓';
+    if (missing.length) {
+      $('calName').textContent = 'saved ✓ (media excluded — see status)';
+      statusEl.textContent = `Saved, but media for ${missing.join(', ')} won't load from this file — ` +
+        `it was attached locally, not via 🔗 URL. Re-attach via 🔗 to include it next time.`;
+    } else {
+      $('calName').textContent = 'saved ✓';
+    }
   };
   $('loadBtn').onclick = () => $('loadFile').click();
   $('loadFile').onchange = e => {
