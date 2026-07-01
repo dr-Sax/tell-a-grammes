@@ -45,9 +45,9 @@ function calibrateAt(clientX, clientY) {
   }
   if (n < 4) { statusEl.textContent = 'Tap missed — too dark or unsaturated, try again'; return; }
 
-  let h = Math.atan2(sinSum, cosSum) * 180 / Math.PI;
-  if (h < 0) h += 360;
-  const cal = { h, s: ss / n, v: vs / n };
+  let meanH = Math.atan2(sinSum, cosSum) * 180 / Math.PI;
+  if (meanH < 0) meanH += 360;
+  const cal = { h: meanH, s: ss / n, v: vs / n };
   state.calibrated[state.calibrating] = cal;
   state.smoothHulls[state.calibrating] = null;
   statusEl.textContent =
