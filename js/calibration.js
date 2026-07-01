@@ -50,6 +50,8 @@ function calibrateAt(clientX, clientY) {
   const cal = { h: meanH, s: ss / n, v: vs / n };
   state.calibrated[state.calibrating] = cal;
   state.smoothHulls[state.calibrating] = null;
+  state.lastCentroid[state.calibrating] = null;
+  state.missStreak[state.calibrating] = 0;
   statusEl.textContent =
     `${PIECES[state.calibrating].name} → H=${Math.round(cal.h)}° S=${cal.s.toFixed(2)} V=${cal.v.toFixed(2)}`;
   state.calibrating = -1;
@@ -183,6 +185,8 @@ export function wireSaveLoad() {
     if (!confirm('Clear all calibrations?')) return;
     state.calibrated = Array(N).fill(null);
     state.smoothHulls = Array(N).fill(null);
+    state.lastCentroid = Array(N).fill(null);
+    state.missStreak = Array(N).fill(0);
     $('calName').textContent = '';
     buildUI();
   };

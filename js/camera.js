@@ -43,6 +43,8 @@ export function applyOrientation() {
   allocBuffers(PW, PH);
   state.smoothHulls = Array(N).fill(null);  // coordinate space changed
   state.smoothArea  = Array(N).fill(0);
+  state.lastCentroid = Array(N).fill(null);
+  state.missStreak  = Array(N).fill(0);
   return { PW, PH };
 }
 

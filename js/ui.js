@@ -94,6 +94,8 @@ export function buildUI() {
     clrBtn.onclick = () => {
       state.calibrated[i] = null;
       state.smoothHulls[i] = null;
+      state.lastCentroid[i] = null;
+      state.missStreak[i] = 0;
       buildUI();
     };
 

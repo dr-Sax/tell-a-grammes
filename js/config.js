@@ -48,12 +48,26 @@ export const PROC_TARGET_W = 320;
 // only close, to bridge small gaps in the ring (glare / anti-aliasing).
 export const CLOSE_R = 2;
 
+// How far (as a fraction of the proc-frame width) a piece's blob is allowed
+// to jump between frames while continuously tracked, before detectPiece
+// treats "something matched over there" as a miss rather than snapping to
+// it. This is the main defense against a hand — or a stray patch of similar
+// fluorescence — hijacking a piece's tracking just by being the bigger blob
+// this frame. Physical pieces don't teleport, so anything far from the last
+// known position is ignored until re-acquired after MISS_GRACE_FRAMES.
+export const MAX_JUMP_FRAC = 0.35;
+
+// Consecutive missed frames tolerated before a piece's overlay is cleared and
+// its last-known position forgotten (triggering a fresh largest-blob
+// re-acquisition next time something is found). This grace period is what
+// stops a hand briefly passing over a piece from flickering its overlay off.
+export const MISS_GRACE_FRAMES = 8;
+
 // Live tuning, mutated by the sliders. Kept as one object so every module sees
 // edits through the same reference.
 export const params = {
-  htol: 9,     // hue tolerance in OpenCV 0-180 units (×2 = degrees)
-  stol: 48,    // saturation tolerance on 0-255 (÷255 = fraction)
-  vtol: 35,    // value tolerance on 0-255 (÷255 = fraction)
-  minArea: 80, // min connected-component area in proc px (a ring is small)
+  htol: 12,     // hue tolerance in OpenCV 0-180 units (×2 = degrees)
+  stol: 33,    // saturation tolerance on 0-255 (÷255 = fraction)
+  vtol:75,    // value tolerance on 0-255 (÷255 = fraction)
+  minArea: 20, // min connected-component area in proc px (a ring is small)
 };
-

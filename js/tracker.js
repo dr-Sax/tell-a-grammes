@@ -1,7 +1,7 @@
 // ── tracker: pixels → polygon ─────────────────────────────────────────────────
 // Per-piece detection: calibrated colour → boundary trace → fixed-N polygon.
 
-import { params, CLOSE_R, BOUNDARY_N } from './config.js';
+import { params, CLOSE_R, BOUNDARY_N, MAX_JUMP_FRAC } from './config.js';
 
 let Hc, Sc, Vc;            // per-pixel HSV (Float32: H 0-360, S/V 0-1)
 let maskA, maskB, maskC;   // binary scratch masks (Uint8)
@@ -32,9 +32,17 @@ export function computeHSV(img, count) {
 
 function buildMask(cal, count) {
   const hT = params.htol * 2, sT = params.stol / 255, vT = params.vtol / 255;
+  // V tolerance is a FLOOR only, not a band. Under blacklight the paint
+  // should be the brightest saturated thing in frame, and its absolute
+  // brightness legitimately drifts more than ambient-light tracking would
+  // (UV intensity falls off with distance/angle, gloss finishes add
+  // hotspots) — rejecting pixels for being "too bright" only ever cost real
+  // detections as a piece moved further from the light source, it never
+  // filtered anything useful.
+  const vFloor = cal.v - vT;
   for (let p = 0; p < count; p++) {
     let dh = Math.abs(Hc[p] - cal.h) % 360; if (dh > 180) dh = 360 - dh;
-    maskA[p] = (dh <= hT && Math.abs(Sc[p] - cal.s) <= sT && Math.abs(Vc[p] - cal.v) <= vT) ? 1 : 0;
+    maskA[p] = (dh <= hT && Math.abs(Sc[p] - cal.s) <= sT && Vc[p] >= vFloor) ? 1 : 0;
   }
 }
 
@@ -71,26 +79,29 @@ function morphClose(w, h, r) {
   morphPass(maskB, maskA, maskC, w, h, r, true);
 }
 
-// Flood-fill label maskA; return { label, area, start } for the largest blob
-// over minA. `start` is the blob's seed pixel — the first pixel of that label
-// hit in row-major order, i.e. its topmost-leftmost pixel, which is always on
-// the outer boundary and is therefore a valid traceBoundary start. (This used
-// to be recovered by a second full-frame scan in findStart; recording it here
-// makes that scan unnecessary.)
-function largestBlob(w, h, minA) {
+// Flood-fill label maskA; return EVERY blob at or above minA, each with area,
+// centroid, and a seed pixel for traceBoundary (topmost-leftmost pixel of
+// that label, always on the outer boundary — see the old largestBlob's note,
+// still true per-blob here). Enumerating every candidate, not just the
+// biggest, is what lets chooseBlob() prefer "the blob near where this piece
+// was last seen" over "whatever's biggest right now" — the latter is exactly
+// what let a hand or a stray patch of matching fluorescence hijack tracking.
+function findBlobs(w, h, minA) {
   const n = w * h;
   labels.fill(0);
-  let cur = 0, bestLabel = 0, bestArea = minA, bestStart = -1;
+  let cur = 0;
+  const blobs = [];
   for (let s = 0; s < n; s++) {
     if (!maskA[s] || labels[s]) continue;
     cur++;
     let sp = 0;
     labelStack[sp++] = s; labels[s] = cur;
-    let area = 0;
+    let area = 0, sx = 0, sy = 0;
     while (sp > 0) {
       const idx = labelStack[--sp];
       area++;
       const x = idx % w, y = (idx / w) | 0;
+      sx += x; sy += y;
       for (let dy = -1; dy <= 1; dy++) {
         const ny = y + dy; if (ny < 0 || ny >= h) continue;
         const nrow = ny * w;
@@ -102,9 +113,35 @@ function largestBlob(w, h, minA) {
         }
       }
     }
-    if (area > bestArea) { bestArea = area; bestLabel = cur; bestStart = s; }
+    if (area >= minA) blobs.push({ label: cur, area, cx: sx / area, cy: sy / area, start: s });
   }
-  return bestLabel ? { label: bestLabel, area: bestArea, start: bestStart } : null;
+  return blobs;
+}
+
+// Choose which blob is "the piece". With a known previous position
+// (prevCentroid, proc-space [x,y]), prefer the LARGEST blob within
+// MAX_JUMP_FRAC of the frame width from that position, ignoring anything
+// farther away no matter how big — a hand or stray fluorescence winning on
+// size alone doesn't matter if it's nowhere near where the piece actually
+// was. If nothing qualifies nearby, this frame reads as a miss (returns
+// null) rather than snapping to a distant blob; the caller's grace-period
+// logic decides whether that's a brief occlusion or a real loss.
+// With no previous position (first acquisition, or re-acquiring after a real
+// loss), there's nothing to be near, so just take the largest blob overall.
+function chooseBlob(blobs, prevCentroid, w) {
+  if (!blobs.length) return null;
+  if (prevCentroid) {
+    const maxJump = w * MAX_JUMP_FRAC;
+    let best = null;
+    for (const b of blobs) {
+      const d = Math.hypot(b.cx - prevCentroid[0], b.cy - prevCentroid[1]);
+      if (d <= maxJump && (!best || b.area > best.area)) best = b;
+    }
+    return best;
+  }
+  let best = blobs[0];
+  for (const b of blobs) if (b.area > best.area) best = b;
+  return best;
 }
 
 // Moore-neighbor offsets, CCW starting East. Tracing the outer boundary this
@@ -134,7 +171,7 @@ function traceBoundary(label, startIdx, w, h) {
 }
 
 // Resample the trace to n points, evenly spaced by arc length. The trace always
-// starts at the blob's topmost-leftmost pixel (see largestBlob), so point index
+// starts at the blob's topmost-leftmost pixel (see findBlobs), so point index
 // is already stable frame to frame without any anchor search — index i means
 // "the same point around the perimeter" every frame, which is what lets the
 // straight per-index lerp in geometry.js's matchAndLerp be correct.
@@ -163,17 +200,19 @@ function resampleByArcLength(trace, n) {
   return out;
 }
 
-// Full per-piece pipeline. Returns { poly, filled } or null.
-// computeHSV must have been called for this frame first.
-export function detectPiece(cal, w, h) {
+// Full per-piece pipeline. Returns { poly, filled, centroid } or null.
+// computeHSV must have been called for this frame first. `prevCentroid` is
+// this piece's last known proc-space position (or null) — see chooseBlob.
+export function detectPiece(cal, w, h, prevCentroid) {
   buildMask(cal, w * h);
   morphClose(w, h, CLOSE_R);
-  const blob = largestBlob(w, h, params.minArea);
+  const blobs = findBlobs(w, h, params.minArea);
+  const blob = chooseBlob(blobs, prevCentroid, w);
   if (!blob) return null;
 
   const trace = traceBoundary(blob.label, blob.start, w, h);
   if (trace.length < 3) return null;
 
   const poly = resampleByArcLength(trace, BOUNDARY_N);
-  return { poly, filled: blob.area };
+  return { poly, filled: blob.area, centroid: [blob.cx, blob.cy] };
 }

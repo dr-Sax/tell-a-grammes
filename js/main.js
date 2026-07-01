@@ -1,7 +1,7 @@
 // ── main: orchestration + frame loop ──────────────────────────────────────────
 // Entry point. Wires the modules together and runs the per-frame pipeline.
 
-import { PIECES, N, LERP } from './config.js';
+import { PIECES, N, LERP, MISS_GRACE_FRAMES } from './config.js';
 import { state } from './state.js';
 import { matchAndLerp } from './geometry.js';
 import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls, panelToggle, overlayPanel } from './dom.js';
@@ -40,8 +40,28 @@ function processFrame(now) {
     const cal = state.calibrated[i];
     if (!cal) continue;
 
-    const found = detectPiece(cal, PW, PH);
-    if (!found) { state.smoothHulls[i] = null; state.smoothArea[i] = 0; continue; }
+    const found = detectPiece(cal, PW, PH, state.lastCentroid[i]);
+
+    if (!found) {
+      state.missStreak[i]++;
+      if (state.missStreak[i] > MISS_GRACE_FRAMES) {
+        // real loss (piece removed, or gone long enough to stop trusting the
+        // last position) — clear so the next hit re-acquires from scratch.
+        state.smoothHulls[i] = null;
+        state.smoothArea[i] = 0;
+        state.lastCentroid[i] = null;
+      } else if (state.smoothHulls[i]) {
+        // brief dropout — e.g. a hand passing over the piece for a frame or
+        // two. Hold the last known shape on screen instead of letting the
+        // overlay flicker off; lastCentroid is left untouched so detection
+        // keeps searching near where the piece actually is.
+        drawOverlay(state.smoothHulls[i], i, MW, MH);
+      }
+      continue;
+    }
+
+    state.missStreak[i] = 0;
+    state.lastCentroid[i] = found.centroid;
 
     // Detected this frame → advance this piece's caption clock. Pieces that
     // weren't found hit the `continue` above, so their clock is left untouched
