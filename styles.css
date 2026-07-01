@@ -52,7 +52,7 @@ input[type=range] { accent-color: #4a90d9; }
 #ui { margin-top: 6px; }
 .piece-row { border-bottom: 1px solid #1c1c1c; padding: 4px 0; }
 .piece-main { display: flex; align-items: center; gap: 6px; }
-.piece-media { display: flex; align-items: center; gap: 6px; padding: 3px 0 2px 30px; }
+.piece-media { display: flex; align-items: center; gap: 6px; padding: 3px 0 2px 30px; flex-wrap: wrap; }
 .swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid #333; flex-shrink: 0; }
 .media-thumb { width: 40px; height: 28px; border-radius: 3px; object-fit: cover; border: 1px solid #333; background: #111; display:none; }
 .media-thumb.on { display: block; }
@@ -102,8 +102,8 @@ body.immersive #exitFs { display: block; }
    or paintable while closed. */
 #overlayPanel {
   position: absolute; z-index: 1000; left: 0; right: 0; bottom: 0;
-  max-height: 80vh; display: flex; flex-direction: column;
-  background: rgba(9,9,11,0.10); backdrop-filter: blur(0px);
+  max-height: 66vh; display: flex; flex-direction: column;
+  background: rgba(9,9,11,0.55); backdrop-filter: blur(10px);
   border-top-left-radius: 16px; border-top-right-radius: 16px;
   border-top: 1px solid rgba(255,255,255,0.08);
   transform: translateY(100%); transition: transform 0.22s ease;

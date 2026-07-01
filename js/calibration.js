@@ -1,12 +1,12 @@
 // ── calibration: colour sampling + save/load ──────────────────────────────────
 // Tap-to-sample a piece's border colour, and persist/restore the full setup.
 
-import { PIECES, N, params } from './config.js';
+import { PIECES, N, params, MEDIA_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { rgb2hsv } from './hsv.js';
 import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel, $ } from './dom.js';
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
-import { pieceMedia } from './media.js';
+import { pieceMedia, loadMediaFromURL } from './media.js';
 import { buildUI, syncSliders } from './ui.js';
 
 function calibrateAt(clientX, clientY) {
@@ -135,34 +135,91 @@ export function wireCalibration() {
 }
 
 // ── save / load ───────────────────────────────────────────────────────────────
+// The schema is a strict superset of the original calibration-only file:
+// htol/stol/vtol/minArea and per-piece h/s/v/name are unchanged, so old
+// calibration-only JSON files still load fine (missing media/adjust just
+// means "leave that piece's media/framing alone"). New fields:
+//   media  — { type, url } — ONLY set if the piece's current media has a
+//            sourceURL (i.e. it was attached via the 🔗 URL control, or by
+//            loading a previous config). Media attached via the local file
+//            picker has no URL to reference and is silently omitted here —
+//            saveBtn warns below when that happens.
+//   adjust — the piece's zoom/rotate/xshift/yshift framing sliders.
 function getCalData() {
   return {
     htol: params.htol, stol: params.stol, vtol: params.vtol, minArea: params.minArea,
-    pieces: state.calibrated.map((c, i) => c ? { ...c, name: PIECES[i].name } : null),
+    pieces: state.calibrated.map((c, i) => {
+      if (!c) return null;
+      const out = { ...c, name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
+      const m = pieceMedia[i];
+      if (m && m.sourceURL) out.media = { type: m.type, url: m.sourceURL };
+      return out;
+    }),
   };
 }
 
-function applyCalData(data) {
+// Applies tolerances, colours, and framing synchronously and immediately
+// (buildUI reflects them right away), then fetches any referenced media one
+// piece at a time. Media runs after and separately so a slow or broken URL
+// can't block or fail the fast, important part of the restore. Returns a
+// promise that resolves once every media fetch has settled (success or not).
+async function applyCalData(data) {
   for (const key of ['htol', 'stol', 'vtol', 'minArea'])
     if (data[key] !== undefined) params[key] = data[key];
   syncSliders();
+
   if (Array.isArray(data.pieces)) {
     data.pieces.forEach((c, i) => {
       state.calibrated[i] = c ? { h: c.h, s: c.s, v: c.v } : null;
       state.smoothHulls[i] = null;
+      state.lastCentroid[i] = null;
+      state.missStreak[i] = 0;
+      if (c && c.adjust) {
+        // merge over defaults rather than replace outright, so a config
+        // saved before a slider was added doesn't leave that key undefined
+        state.mediaAdjust[i] = Object.fromEntries(
+          MEDIA_SLIDERS.map(s => [s.key, c.adjust[s.key] ?? s.def])
+        );
+      }
     });
   }
   buildUI();
+
+  if (Array.isArray(data.pieces)) {
+    for (let i = 0; i < data.pieces.length; i++) {
+      const media = data.pieces[i] && data.pieces[i].media;
+      if (!media || !media.url) continue;
+      statusEl.textContent = `Loading media for ${PIECES[i] ? PIECES[i].name : 'piece ' + (i + 1)}…`;
+      try {
+        await loadMediaFromURL(i, media.url, buildUI);
+      } catch (err) {
+        // one bad/unreachable URL shouldn't stop the rest of the config from
+        // loading — note it and move on to the next piece.
+        statusEl.textContent = `${PIECES[i] ? PIECES[i].name : 'Piece'}: media load failed — ${err.message || err}`;
+      }
+    }
+    statusEl.textContent = 'Config loaded';
+  }
 }
 
 export function wireSaveLoad() {
   $('saveBtn').onclick = () => {
-    const blob = new Blob([JSON.stringify(getCalData(), null, 2)], { type: 'application/json' });
+    const data = getCalData();
+    // flag calibrated pieces whose media won't be included — attached via a
+    // local file pick, so there's no URL for the saved config to reference.
+    const missing = data.pieces
+      .map((p, i) => (p && pieceMedia[i] && !pieceMedia[i].sourceURL) ? PIECES[i].name : null)
+      .filter(Boolean);
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'tangram-calibration.json'; a.click();
+    a.href = url; a.download = 'tangram-config.json'; a.click();
     URL.revokeObjectURL(url);
-    $('calName').textContent = 'saved ✓';
+
+    $('calName').textContent = missing.length
+      ? `saved ✓ (media not included for: ${missing.join(', ')} — attach via 🔗 URL to include)`
+      : 'saved ✓';
   };
   $('loadBtn').onclick = () => $('loadFile').click();
   $('loadFile').onchange = e => {
@@ -170,13 +227,18 @@ export function wireSaveLoad() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
+      let data;
       try {
-        applyCalData(JSON.parse(ev.target.result));
-        $('calName').textContent = `loaded: ${file.name}`;
-        statusEl.textContent = 'Calibration loaded — start camera to begin tracking';
+        data = JSON.parse(ev.target.result);
       } catch (err) {
-        statusEl.textContent = 'Failed to parse calibration file';
+        statusEl.textContent = 'Failed to parse config file';
+        return;
       }
+      $('calName').textContent = `loading: ${file.name}…`;
+      statusEl.textContent = 'Loading config…';
+      applyCalData(data).then(() => {
+        $('calName').textContent = `loaded: ${file.name}`;
+      });
     };
     reader.readAsText(file);
     e.target.value = '';

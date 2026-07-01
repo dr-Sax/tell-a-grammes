@@ -6,8 +6,8 @@
 import { PIECES, N, params, MEDIA_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
-import { tapHint, crosshair, uiEl, overlayPanel, panelToggle, $ } from './dom.js';
-import { pieceMedia, disposeMedia, loadMediaFile } from './media.js';
+import { tapHint, crosshair, uiEl, overlayPanel, panelToggle, statusEl, $ } from './dom.js';
+import { pieceMedia, disposeMedia, loadMediaFile, loadMediaFromURL } from './media.js';
 import { captionThumbURL } from './caption.js';
 
 const SLIDER_KEYS = ['htol', 'stol', 'vtol', 'minArea'];
@@ -187,13 +187,30 @@ function buildMediaRow(i) {
   upBtn.textContent = m ? '⟳ swap' : '+ media';
   upBtn.onclick = () => fileInput.click();
 
+  // Attaching from a URL (vs. a local file) is what lets this piece's media
+  // round-trip through a saved config — see getCalData() in calibration.js,
+  // which can only reference media by URL, not re-embed a local pick. Kept
+  // deliberately minimal (a native prompt) rather than a whole persistent
+  // input field, matching the rest of this UI's style.
+  const urlBtn = document.createElement('button');
+  urlBtn.className = 'upload-btn';
+  urlBtn.title = 'Attach media by URL — required for this piece\'s media to be included when you save a config';
+  urlBtn.textContent = '🔗';
+  urlBtn.onclick = () => {
+    const url = prompt(`${PIECES[i].name}: media URL`, m && m.sourceURL || '');
+    if (!url) return;
+    statusEl.textContent = `${PIECES[i].name}: loading…`;
+    loadMediaFromURL(i, url, () => { buildUI(); overlayPanel.classList.remove('open'); })
+      .catch(err => { statusEl.textContent = `${PIECES[i].name}: ${err.message || 'load failed'}`; });
+  };
+
   const clrMediaBtn = document.createElement('button');
   clrMediaBtn.className = 'clear-media-btn';
   clrMediaBtn.textContent = '✕';
   clrMediaBtn.disabled = !m;
   clrMediaBtn.onclick = () => { disposeMedia(i); buildUI(); };
 
-  mediaRow.append(thumb, nameEl, fileInput, upBtn, clrMediaBtn);
+  mediaRow.append(thumb, nameEl, fileInput, upBtn, urlBtn, clrMediaBtn);
   if (!m) return mediaRow;
 
   const wrap = document.createElement('div');
