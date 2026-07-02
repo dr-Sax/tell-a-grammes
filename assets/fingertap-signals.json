@@ -1,0 +1,75 @@
+{
+  "htol": 22,
+  "stol": 30,
+  "vtol": 100,
+  "minArea": 20,
+  "pieces": [
+    {
+      "name": "Piece 1",
+      "adjust": {
+        "zoom": 1,
+        "rotate": 0,
+        "xshift": 0,
+        "yshift": 0
+      },
+      "h": 305.474576920866,
+      "s": 0.8621941581367093,
+      "v": 0.7620915032679725,
+      "media": {
+        "type": "gif",
+        "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExcG44MWE1M2pubjY0bWp4a204ZnFyamlmZWFjazZ6YWYweWhpcWF4ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XMaB779YCmP9m/giphy.gif"
+      }
+    },
+    {
+      "name": "Piece 2",
+      "adjust": {
+        "zoom": 1,
+        "rotate": 0,
+        "xshift": 0,
+        "yshift": 0
+      },
+      "h": 134.43571994740282,
+      "s": 0.8184961177985163,
+      "v": 0.7732778066979001,
+      "media": {
+        "type": "gif",
+        "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmo5bHR2MzkxZ3JmOTdnNDIwd2JoN25pMmowbHcwbWlpajZtOXN5dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/X0iqiPHFdrEctzDKMU/giphy.gif"
+      }
+    },
+    {
+      "name": "Piece 3",
+      "adjust": {
+        "zoom": 1,
+        "rotate": 0,
+        "xshift": 0,
+        "yshift": 0
+      },
+      "h": 82.01971373639282,
+      "s": 0.6857935819064761,
+      "v": 0.6207917129115794,
+      "media": {
+        "type": "gif",
+        "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExbjQwY252NjVkNmt5Y28wbDJuNW41bnhxaXNqOXdqcWZidmNmM3c5MCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/QuPrp3BI6cMe2lErCb/giphy.gif"
+      }
+    },
+    {
+      "name": "Piece 4",
+      "adjust": {
+        "zoom": 1,
+        "rotate": 0,
+        "xshift": 0,
+        "yshift": 0
+      },
+      "h": 163.36015124846602,
+      "s": 0.9558723311898327,
+      "v": 0.6797190517998246,
+      "media": {
+        "type": "gif",
+        "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExZzJqdzA1a2hlaWl4NWE2dHN3Y29peDZleGMwOGJkc3QxdTNwdHcxdyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/11T1gShHejUvPW/giphy.gif"
+      }
+    },
+    null,
+    null,
+    null
+  ]
+}
