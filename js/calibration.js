@@ -270,3 +270,24 @@ export function wireSaveLoad() {
     buildUI();
   };
 }
+
+// Fetch a config JSON by URL and apply it — same restore path as picking a
+// file with loadBtn, just sourced from the network instead of disk. Meant
+// for a boot-time link like `?config=<url-encoded config URL>` (wired in
+// main.js) so a whole setup — tolerances, colours, media, framing — can be
+// reached with one shared link instead of a manual load. Same CORS rules as
+// media: the host has to actually send Access-Control-Allow-Origin, so this
+// works from e.g. raw.githubusercontent.com or your own server, but not from
+// a Google Drive share link or similar viewer-page URL.
+export async function loadConfigFromURL(url) {
+  statusEl.textContent = 'Loading config from URL…';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    await applyCalData(data);
+    $('calName').textContent = 'loaded from URL';
+  } catch (err) {
+    statusEl.textContent = `Failed to load config from URL — ${err.message || err}`;
+  }
+}
