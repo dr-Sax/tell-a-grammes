@@ -210,7 +210,29 @@ function buildMediaRow(i) {
   clrMediaBtn.disabled = !m;
   clrMediaBtn.onclick = () => { disposeMedia(i); buildUI(); };
 
-  mediaRow.append(thumb, nameEl, fileInput, upBtn, urlBtn, clrMediaBtn);
+  const rowButtons = [thumb, nameEl, fileInput, upBtn, urlBtn];
+
+  // Click-through link — only meaningful once there's media to tap on. This
+  // is deliberately separate from urlBtn: the asset's own URL (what's drawn
+  // on the piece) and the link it opens when tapped can be totally different
+  // domains — see links.js for where the tap is actually handled.
+  if (m) {
+    const linkBtn = document.createElement('button');
+    linkBtn.className = 'upload-btn';
+    linkBtn.title = 'Set a link to open when this piece is tapped (separate from the media\'s own URL)';
+    linkBtn.textContent = m.link ? '↗ linked' : '↗ link';
+    if (m.link) linkBtn.classList.add('done');
+    linkBtn.onclick = () => {
+      const link = prompt(`${PIECES[i].name}: open this URL when tapped (blank to remove)`, m.link || '');
+      if (link === null) return;
+      m.link = link.trim() || null;
+      buildUI();
+    };
+    rowButtons.push(linkBtn);
+  }
+
+  rowButtons.push(clrMediaBtn);
+  mediaRow.append(...rowButtons);
   if (!m) return mediaRow;
 
   const wrap = document.createElement('div');
@@ -224,24 +246,13 @@ export function wireViewControls() {
 
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
 
-  // iPhone Safari (16.4+) DOES now support requestFullscreen on arbitrary
-  // elements, but it renders them letterboxed to the element's aspect ratio
-  // at request-time instead of stretching to fill — which shows up as black
-  // bars on the sides in landscape. That's strictly worse than our own
-  // `.immersive` CSS (which fills the viewport via object-fit: cover), so on
-  // iPhone we deliberately skip the native API and rely on the CSS class
-  // only. iPadOS/desktop/Android don't have this letterboxing quirk, so they
-  // still get real fullscreen (hides Safari/Chrome chrome entirely).
-  const isIPhone = /iPhone/.test(navigator.userAgent) ||
-    (/iPad|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1 && screen.height < 900);
-
   const enterImmersive = () => {
     document.body.classList.add('immersive');
+    // Real Fullscreen API where it exists (desktop / Android / iPadOS). iPhone
+    // Safari has none — the CSS class handles layout there.
     const wrap = $('canvasWrap');
-    if (!isIPhone) {
-      const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
-      if (req) { try { const p = req.call(wrap); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
-    }
+    const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+    if (req) { try { const p = req.call(wrap); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
     setTimeout(() => window.scrollTo(0, 1), 80);  // nudge Safari toolbars to collapse
   };
   const exitImmersive = () => {

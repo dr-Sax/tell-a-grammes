@@ -10,6 +10,7 @@ import { computeHSV, detectPiece } from './tracker.js';
 import { drawOverlay, renderDebugBar } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls } from './ui.js';
 import { wireCalibration, wireSaveLoad, loadConfigFromURL } from './calibration.js';
+import { wireMediaLinks } from './links.js';
 
 function processFrame(now) {
   if (!state.running) return;
@@ -118,6 +119,7 @@ wireSliders();
 wireViewControls();
 wireCalibration();
 wireSaveLoad();
+wireMediaLinks();
 syncSliders();
 buildUI();
 

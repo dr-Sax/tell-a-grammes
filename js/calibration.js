@@ -139,11 +139,13 @@ export function wireCalibration() {
 // htol/stol/vtol/minArea and per-piece h/s/v/name are unchanged, so old
 // calibration-only JSON files still load fine (missing media/adjust just
 // means "leave that piece's media/framing alone"). New fields:
-//   media  — { type, url } — ONLY set if the piece's current media has a
-//            sourceURL (i.e. it was attached via the 🔗 URL control, or by
-//            loading a previous config). Media attached via the local file
-//            picker has no URL to reference and is silently omitted here —
-//            saveBtn warns below when that happens.
+//   media  — { type, url, link? } — url is ONLY set if the piece's current
+//            media has a sourceURL (i.e. it was attached via the 🔗 URL
+//            control, or by loading a previous config). Media attached via
+//            the local file picker has no URL to reference and is silently
+//            omitted here — saveBtn warns below when that happens. `link`,
+//            if set, is a separate click-through URL (see the ↗ link button
+//            in ui.js) — it can point anywhere, unrelated to the asset itself.
 //   adjust — the piece's zoom/rotate/xshift/yshift framing sliders.
 function getCalData() {
   return {
@@ -161,7 +163,10 @@ function getCalData() {
 
       const out = { name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
       if (c) Object.assign(out, { h: c.h, s: c.s, v: c.v });
-      if (hasMediaURL) out.media = { type: m.type, url: m.sourceURL };
+      if (hasMediaURL) {
+        out.media = { type: m.type, url: m.sourceURL };
+        if (m.link) out.media.link = m.link;
+      }
       return out;
     }),
   };
@@ -203,6 +208,7 @@ async function applyCalData(data) {
       statusEl.textContent = `Loading media for ${PIECES[i] ? PIECES[i].name : 'piece ' + (i + 1)}…`;
       try {
         await loadMediaFromURL(i, media.url, buildUI);
+        if (media.link) pieceMedia[i].link = media.link;
       } catch (err) {
         // one bad/unreachable URL shouldn't stop the rest of the config from
         // loading — note it and move on to the next piece.

@@ -8,7 +8,7 @@ import { isGif, loadGif } from './gif.js';
 import { parseCues } from './caption.js';
 
 // per piece: { type:'image'|'video'|'gif'|'caption', el, url, name, sourceURL,
-//              stop?, cues? } or null
+//              link, stop?, cues? } or null
 //   el        — a drawImage-able source (Image, video, or gif's offscreen canvas); none for captions
 //   url       — object URL to revoke on dispose (video only; null otherwise)
 //   sourceURL — the remote URL this media was fetched from, if it was
@@ -16,6 +16,8 @@ import { parseCues } from './caption.js';
 //               This is what lets a saved config re-reference the asset by
 //               URL instead of needing to re-embed or re-upload it — see
 //               getCalData() in calibration.js.
+//   link      — optional click-through URL, unrelated to the asset itself —
+//               set via the ↗ button in ui.js, opened on tap by links.js.
 //   stop      — timer-halt fn (gif only; stops frame compositing on dispose)
 //   cues      — time-sorted [{ t, text }] (caption only)
 export const pieceMedia = Array(N).fill(null);
