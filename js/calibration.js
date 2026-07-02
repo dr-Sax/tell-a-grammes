@@ -6,7 +6,7 @@ import { state } from './state.js';
 import { rgb2hsv } from './hsv.js';
 import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel, $ } from './dom.js';
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
-import { pieceMedia, loadMediaFromURL } from './media.js';
+import { pieceMedia, loadMediaFromURL, attachCaptionCues } from './media.js';
 import { buildUI, syncSliders } from './ui.js';
 
 function calibrateAt(clientX, clientY) {
@@ -139,13 +139,17 @@ export function wireCalibration() {
 // htol/stol/vtol/minArea and per-piece h/s/v/name are unchanged, so old
 // calibration-only JSON files still load fine (missing media/adjust just
 // means "leave that piece's media/framing alone"). New fields:
-//   media  — { type, url, link? } — url is ONLY set if the piece's current
-//            media has a sourceURL (i.e. it was attached via the 🔗 URL
-//            control, or by loading a previous config). Media attached via
-//            the local file picker has no URL to reference and is silently
-//            omitted here — saveBtn warns below when that happens. `link`,
-//            if set, is a separate click-through URL (see the ↗ link button
-//            in ui.js) — it can point anywhere, unrelated to the asset itself.
+//   media  — { type, url, link? } for images/video/gifs — url is ONLY set if
+//            the piece's current media has a sourceURL (i.e. it was attached
+//            via the 🔗 URL control, or by loading a previous config). Media
+//            attached via the local file picker has no URL to reference and
+//            is silently omitted here — saveBtn warns below when that
+//            happens. Captions are the exception: { type:'caption', cues,
+//            link? } — cues are small text, so they're always embedded
+//            inline regardless of how they were attached, rather than
+//            requiring a hosted URL like binary media does. `link`, if set,
+//            is a separate click-through URL (see the ↗ link button in
+//            ui.js) — it can point anywhere, unrelated to the asset itself.
 //   adjust — the piece's zoom/rotate/xshift/yshift framing sliders.
 function getCalData() {
   return {
@@ -153,17 +157,22 @@ function getCalData() {
     pieces: PIECES.map((_, i) => {
       const c = state.calibrated[i];
       const m = pieceMedia[i];
-      // export this piece's slot if there's ANYTHING to save for it — colour,
-      // a URL-backed media attachment, or non-default framing. Gating this on
-      // calibration alone (the old behaviour) silently dropped media for any
-      // piece that had media attached but wasn't calibrated yet.
-      const hasMediaURL = m && m.sourceURL;
+      const isCaption = m && m.type === 'caption' && m.cues && m.cues.length;
+      const hasMediaURL = m && m.sourceURL && !isCaption;
       const adjustTouched = MEDIA_SLIDERS.some(s => state.mediaAdjust[i][s.key] !== s.def);
-      if (!c && !hasMediaURL && !adjustTouched) return null;
+      // export this piece's slot if there's ANYTHING to save for it — colour,
+      // a caption (always exportable), a URL-backed media attachment, or
+      // non-default framing. Gating this on calibration alone (the old
+      // behaviour) silently dropped media for any piece that had media
+      // attached but wasn't calibrated yet.
+      if (!c && !isCaption && !hasMediaURL && !adjustTouched) return null;
 
       const out = { name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
       if (c) Object.assign(out, { h: c.h, s: c.s, v: c.v });
-      if (hasMediaURL) {
+      if (isCaption) {
+        out.media = { type: 'caption', cues: Object.fromEntries(m.cues.map(cue => [String(cue.t), cue.text])) };
+        if (m.link) out.media.link = m.link;
+      } else if (hasMediaURL) {
         out.media = { type: m.type, url: m.sourceURL };
         if (m.link) out.media.link = m.link;
       }
@@ -204,14 +213,23 @@ async function applyCalData(data) {
   if (Array.isArray(data.pieces)) {
     for (let i = 0; i < data.pieces.length; i++) {
       const media = data.pieces[i] && data.pieces[i].media;
-      if (!media || !media.url) continue;
-      statusEl.textContent = `Loading media for ${PIECES[i] ? PIECES[i].name : 'piece ' + (i + 1)}…`;
+      if (!media) continue;
       try {
-        await loadMediaFromURL(i, media.url, buildUI);
+        if (media.type === 'caption' && media.cues) {
+          // inline cues — synchronous, no network involved
+          attachCaptionCues(i, media.cues, buildUI);
+        } else if (media.url) {
+          // everything else (including a caption referenced by URL instead
+          // of embedded inline — both are still supported)
+          statusEl.textContent = `Loading media for ${PIECES[i] ? PIECES[i].name : 'piece ' + (i + 1)}…`;
+          await loadMediaFromURL(i, media.url, buildUI);
+        } else {
+          continue; // nothing usable for this piece
+        }
         if (media.link) pieceMedia[i].link = media.link;
       } catch (err) {
-        // one bad/unreachable URL shouldn't stop the rest of the config from
-        // loading — note it and move on to the next piece.
+        // one bad/unreachable URL (or malformed inline cues) shouldn't stop
+        // the rest of the config from loading — note it and move on.
         statusEl.textContent = `${PIECES[i] ? PIECES[i].name : 'Piece'}: media load failed — ${err.message || err}`;
       }
     }

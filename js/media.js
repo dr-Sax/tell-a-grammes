@@ -152,3 +152,20 @@ export async function loadMediaFromURL(i, url, refresh) {
   const file = new File([blob], name, { type: blob.type || '' });
   await attachBlob(i, file, refresh, url);
 }
+
+// Attach caption cues directly, with no fetch and no File involved — used
+// when a config embeds cues inline (`media: { type:'caption', cues:{...} }`)
+// rather than referencing a URL. Captions are the one media type small and
+// text-only enough that this makes sense; images/video/gifs still need a
+// real hosted asset. Synchronous (nothing to wait on), but throws the same
+// way attachBlob's caption path does on invalid data, so callers can use the
+// same try/catch they'd use around loadMediaFromURL.
+export function attachCaptionCues(i, cuesRaw, refresh) {
+  const cues = parseCues(cuesRaw);
+  if (!cues.length) throw new Error('No valid cues in inline caption data');
+  disposeMedia(i);
+  pieceMedia[i] = { type: 'caption', el: null, url: null, name: 'inline captions', sourceURL: null, link: null, cues };
+  state.captionElapsed[i] = 0;
+  statusEl.textContent = `${PIECES[i].name}: caption attached`;
+  if (refresh) refresh();
+}
