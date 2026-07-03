@@ -219,7 +219,7 @@ export function syncYouTubeOverlays(MW, MH) {
     const m = pieceMedia[i];
     if (!m || m.type !== 'youtube' || !m.wrap) continue;
     const hull = state.smoothHulls[i];
-    if (!hull || hull.length < 3) { m.wrap.style.display = 'none'; continue; }
+    if (!hull || hull.length < 3) { setPlaying(m, false); continue; }   // ← was display='none'
     positionYT(i, m, hull, scale, baseX, baseY, calibrating);
     setPlaying(m, true);
   }
@@ -230,20 +230,16 @@ export function syncYouTubeOverlays(MW, MH) {
 // main.js's grace period (smoothHulls stays non-null), so only a real loss
 // pauses. Resumes from the same spot, mirroring the caption pause/resume model.
 function setPlaying(m, on) {
+  m.wrap.style.display = on ? 'block' : 'none';
+  const p = m.player;
+  if (!p || !p.getPlayerState) return;              // not ready yet — a later frame reconciles
+  const S = window.YT && window.YT.PlayerState;
+  if (!S) return;
+  let st; try { st = p.getPlayerState(); } catch (e) { return; }
   if (on) {
-    m.wrap.style.display = 'block';
-    // guard on the player existing so an early frame (before whenYT resolves)
-    // doesn't latch _shown=true and skip the eventual play
-    if (!m._shown && m.player && m.player.playVideo) {
-      m._shown = true;
-      try { m.player.playVideo(); } catch (e) {}
-    }
+    if (st !== S.PLAYING && st !== S.BUFFERING) { try { p.playVideo(); } catch (e) {} }
   } else {
-    if (m._shown && m.player) {
-      m._shown = false;
-      try { m.player.pauseVideo(); } catch (e) {}
-    }
-    m.wrap.style.display = 'none';
+    if (st === S.PLAYING || st === S.BUFFERING)  { try { p.pauseVideo(); } catch (e) {} }
   }
 }
 
