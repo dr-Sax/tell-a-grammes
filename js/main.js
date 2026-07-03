@@ -9,7 +9,8 @@ import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { computeHSV, detectPiece } from './tracker.js';
 import { drawOverlay, renderDebugBar } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls } from './ui.js';
-import { wireCalibration, wireSaveLoad, loadConfigFromURL } from './calibration.js';
+import { wireCalibration } from './calibrate.js';
+import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 
 function processFrame(now) {
@@ -128,6 +129,6 @@ buildUI();
 // all in place by the time "start camera" is pressed, so a shared link can
 // carry a whole setup instead of a manual save-then-load round trip. Same
 // CORS requirement as media URLs: the host has to actually allow cross-origin
-// fetches (see loadConfigFromURL's comment in calibration.js).
+// fetches (see loadConfigFromURL's comment in configIO.js).
 const configURL = new URLSearchParams(location.search).get('config');
 if (configURL) loadConfigFromURL(configURL);
