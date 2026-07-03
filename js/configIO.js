@@ -93,10 +93,11 @@ async function applyCalData(data) {
           // inline cues — synchronous, no network involved
           attachCaptionCues(i, media.cues, buildUI);
         } else if (media.url) {
-          // everything else (including a caption referenced by URL instead
-          // of embedded inline — both are still supported)
           statusEl.textContent = `Loading media for ${PIECES[i] ? PIECES[i].name : 'piece ' + (i + 1)}…`;
-          await loadMediaFromURL(i, media.url, buildUI);
+          await loadMediaFromURL(i, media.url, buildUI, {
+            start: media.start, end: media.end, 
+            speed: media.speed, volume: media.volume
+          });
         } else {
           continue; // nothing usable for this piece
         }

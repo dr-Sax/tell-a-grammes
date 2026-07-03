@@ -60,9 +60,9 @@ function processFrame(now) {
         // keeps searching near where the piece actually is.
         drawOverlay(state.smoothHulls[i], i, MW, MH);
       }
-      syncYouTubeOverlays(MW, MH);   // ← must be inside processFrame, after the for-loop
       continue;
     }
+
 
     state.missStreak[i] = 0;
     state.lastCentroid[i] = found.centroid;
@@ -90,7 +90,8 @@ function processFrame(now) {
     state.smoothHulls[i] = matchAndLerp(state.smoothHulls[i], poly, lerpThis);
     drawOverlay(state.smoothHulls[i], i, MW, MH);
   }
-
+  
+  syncYouTubeOverlays(MW, MH);   // ← must be inside processFrame, after the for-loop
   renderDebugBar(counts);
   requestAnimationFrame(processFrame);
 }

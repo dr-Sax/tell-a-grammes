@@ -146,7 +146,7 @@ export function loadMediaFile(i, file, refresh) {
 // or broken URL can't silently race the rest) — so it does NOT swallow
 // rejections; callers should catch per-piece.
 export async function loadMediaFromURL(i, url, refresh) {
-  if (parseYouTube(url)) { attachYouTube(i, url, {}, refresh); return; }
+  if (parseYouTube(url)) { attachYouTube(i, url, opts, refresh); return; }
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
