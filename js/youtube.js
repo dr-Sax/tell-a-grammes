@@ -97,10 +97,7 @@ function armAudio() {
 export function resumeYouTube() {
   for (const m of pieceMedia) {
     if (!m || m.type !== 'youtube' || !m.player) continue;
-    try {
-      if (m.volume > 0) { m.player.unMute(); m.player.setVolume(m.volume); }
-      m.player.playVideo();
-    } catch (e) {}
+    try { if (m.volume > 0) { m.player.unMute(); m.player.setVolume(m.volume); } } catch (e) {}
   }
 }
 
@@ -151,7 +148,7 @@ function createYouTube(i, cfg) {
       events: {
         onReady: e => {
           const p = e.target;
-          try { p.setPlaybackRate(speed); p.setVolume(volume); p.playVideo(); } catch (_) {}
+          try { p.setPlaybackRate(speed); p.setVolume(volume); } catch (_) {}
         },
         onStateChange: e => {
           // ENDED → loop back to `start` (segment loop, or whole-video loop
@@ -224,6 +221,29 @@ export function syncYouTubeOverlays(MW, MH) {
     const hull = state.smoothHulls[i];
     if (!hull || hull.length < 3) { m.wrap.style.display = 'none'; continue; }
     positionYT(i, m, hull, scale, baseX, baseY, calibrating);
+    setPlaying(m, true);
+  }
+}
+
+// Show/hide + play/pause on transitions only — never every frame, which would
+// flood the player's postMessage bridge. Brief dropouts are absorbed by
+// main.js's grace period (smoothHulls stays non-null), so only a real loss
+// pauses. Resumes from the same spot, mirroring the caption pause/resume model.
+function setPlaying(m, on) {
+  if (on) {
+    m.wrap.style.display = 'block';
+    // guard on the player existing so an early frame (before whenYT resolves)
+    // doesn't latch _shown=true and skip the eventual play
+    if (!m._shown && m.player && m.player.playVideo) {
+      m._shown = true;
+      try { m.player.playVideo(); } catch (e) {}
+    }
+  } else {
+    if (m._shown && m.player) {
+      m._shown = false;
+      try { m.player.pauseVideo(); } catch (e) {}
+    }
+    m.wrap.style.display = 'none';
   }
 }
 
@@ -235,7 +255,6 @@ function positionYT(i, m, hull, scale, baseX, baseY, calibrating) {
   }
   const W = (maxX - minX) * scale, H = (maxY - minY) * scale;
   const wrap = m.wrap;
-  wrap.style.display = 'block';
   wrap.style.left   = (baseX + minX * scale) + 'px';
   wrap.style.top    = (baseY + minY * scale) + 'px';
   wrap.style.width  = W + 'px';
