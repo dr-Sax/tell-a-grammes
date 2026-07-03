@@ -1,30 +1,51 @@
 // ── UI: piece rows + view controls ────────────────────────────────────────────
 // Builds the per-piece control rows, wires the tolerance sliders, and the view
 // controls (feed / fullscreen). Calibration sampling and save/load live in
-// calibration.js.
+// calibrate.js.
 
-import { PIECES, N, params, MEDIA_SLIDERS } from './config.js';
+import { PIECES, N, params, MEDIA_SLIDERS, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
-import { tapHint, crosshair, uiEl, overlayPanel, panelToggle, statusEl, $ } from './dom.js';
+import { tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, statusEl, $ } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile, loadMediaFromURL } from './media.js';
 import { captionThumbURL } from './caption.js';
 
-const SLIDER_KEYS = ['htol', 'stol', 'vtol', 'minArea'];
-
+// Builds the detection-tolerance controls (#controls) from TOL_SLIDERS —
+// index.html no longer hardcodes these, so this is the only place their
+// min/max/step/default can drift, and it can't drift from config.js's
+// `params` defaults since it reads them directly.
 export function wireSliders() {
-  for (const key of SLIDER_KEYS) {
-    const range = $(key + 'Range'), val = $(key + 'Val');
-    range.oninput = () => { params[key] = +range.value; val.textContent = params[key]; };
+  controlsEl.innerHTML = '';
+  for (const s of TOL_SLIDERS) {
+    const group = document.createElement('div');
+    group.className = 'ctrl-group';
+
+    const val = document.createElement('span');
+    val.id = s.key + 'Val';
+    val.textContent = params[s.key];
+
+    const label = document.createElement('label');
+    label.append(s.label + ' ', val);
+
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.id = s.key + 'Range';
+    range.min = s.min; range.max = s.max; range.step = s.step;
+    range.value = params[s.key];
+    range.style.flex = '1';
+    range.oninput = () => { params[s.key] = +range.value; val.textContent = params[s.key]; };
+
+    group.append(label, range);
+    controlsEl.appendChild(group);
   }
 }
 
-// Reflect the current params back into the slider DOM (defaults + after load).
+// Reflect the current params back into the slider DOM (after a config load).
 export function syncSliders() {
-  for (const key of SLIDER_KEYS) {
-    const range = $(key + 'Range'), val = $(key + 'Val');
-    if (range) range.value = params[key];
-    if (val) val.textContent = params[key];
+  for (const s of TOL_SLIDERS) {
+    const range = $(s.key + 'Range'), val = $(s.key + 'Val');
+    if (range) range.value = params[s.key];
+    if (val) val.textContent = params[s.key];
   }
 }
 
@@ -188,7 +209,7 @@ function buildMediaRow(i) {
   upBtn.onclick = () => fileInput.click();
 
   // Attaching from a URL (vs. a local file) is what lets this piece's media
-  // round-trip through a saved config — see getCalData() in calibration.js,
+  // round-trip through a saved config — see getCalData() in configIO.js,
   // which can only reference media by URL, not re-embed a local pick. Kept
   // deliberately minimal (a native prompt) rather than a whole persistent
   // input field, matching the rest of this UI's style.

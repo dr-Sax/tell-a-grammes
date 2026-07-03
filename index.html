@@ -31,24 +31,9 @@
     <div id="overlayPanel">
       <div id="overlayHandle"></div>
       <div id="overlayScroll">
-        <div id="controls">
-          <div class="ctrl-group">
-            <label>Hue tol <span id="htolVal">9</span></label>
-            <input type="range" id="htolRange" min="4" max="45" value="9" style="flex:1">
-          </div>
-          <div class="ctrl-group">
-            <label>Sat tol <span id="stolVal">48</span></label>
-            <input type="range" id="stolRange" min="10" max="120" value="48" style="flex:1">
-          </div>
-          <div class="ctrl-group">
-            <label>Val tol <span id="vtolVal">35</span></label>
-            <input type="range" id="vtolRange" min="10" max="150" value="35" style="flex:1">
-          </div>
-          <div class="ctrl-group">
-            <label>Min area <span id="minAreaVal">80</span></label>
-            <input type="range" id="minAreaRange" min="20" max="3000" value="80" step="10" style="flex:1">
-          </div>
-        </div>
+        <!-- populated by ui.js's wireSliders() from config.js's TOL_SLIDERS —
+             keeps min/max/step/default in one place instead of duplicated here -->
+        <div id="controls"></div>
         <div id="calControls" style="display:none; gap:6px; padding:4px 0; flex-wrap:wrap;">
           <button id="saveBtn" style="font-size:12px; padding:5px 12px;">💾 save config</button>
           <button id="loadBtn" style="font-size:12px; padding:5px 12px;">📂 load config</button>

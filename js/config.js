@@ -71,3 +71,15 @@ export const params = {
   vtol:75,    // value tolerance on 0-255 (÷255 = fraction)
   minArea: 20, // min connected-component area in proc px (a ring is small)
 };
+
+// Detection-tolerance sliders (the top row of #controls). `def` here is the
+// single source of truth for these defaults — ui.js generates the slider
+// markup from this array, so index.html no longer hardcodes min/max/value
+// attributes that could silently drift out of sync with `params` above (as
+// they previously did).
+export const TOL_SLIDERS = [
+  { key: 'htol',    label: 'Hue tol',  min: 4,  max: 45,   step: 1,  def: params.htol },
+  { key: 'stol',    label: 'Sat tol',  min: 10, max: 120,  step: 1,  def: params.stol },
+  { key: 'vtol',    label: 'Val tol',  min: 10, max: 150,  step: 1,  def: params.vtol },
+  { key: 'minArea', label: 'Min area', min: 20, max: 3000, step: 10, def: params.minArea },
+];
