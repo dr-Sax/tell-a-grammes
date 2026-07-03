@@ -145,7 +145,7 @@ export function loadMediaFile(i, file, refresh) {
 // is meant to be awaited (applyCalData loads pieces one at a time so a slow
 // or broken URL can't silently race the rest) — so it does NOT swallow
 // rejections; callers should catch per-piece.
-export async function loadMediaFromURL(i, url, refresh) {
+export async function loadMediaFromURL(i, url, refresh, opts={}) {
   if (parseYouTube(url)) { attachYouTube(i, url, opts, refresh); return; }
 
   const res = await fetch(url);
