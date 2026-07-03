@@ -1,7 +1,7 @@
 {
-  "htol": 22,
-  "stol": 30,
-  "vtol": 100,
+  "htol": 7,
+  "stol": 28,
+  "vtol": 80,
   "minArea": 20,
   "pieces": [
     {
@@ -12,9 +12,9 @@
         "xshift": 0,
         "yshift": 0
       },
-      "h": 305.474576920866,
-      "s": 0.8621941581367093,
-      "v": 0.7620915032679725,
+      "h": 77.05764446312108,
+      "s": 0.4035088748305806,
+      "v": 0.7355119825708059,
       "media": {
         "type": "gif",
         "url": "https://media3.giphy.com/media/0K1NGNF6WaC02Z3ySG/200.gif",
@@ -25,16 +25,37 @@
       "name": "Piece 2",
       "adjust": {
         "zoom": 1,
-        "rotate": 0,
-        "xshift": 0,
-        "yshift": 0
+        "rotate": -29.46,
+        "xshift": 0.12,
+        "yshift": 0.24
       },
-      "h": 134.43571994740282,
-      "s": 0.8184961177985163,
-      "v": 0.7732778066979001,
+      "h": 290.06978106203906,
+      "s": 0.33215583957317796,
+      "v": 0.6317810457516342,
       "media": {
         "type": "caption",
-        "cues": {"0":"The", "0.3":"Butterfly", "0.6":"in", "0.9":"honored", "1.2":"Dust", "1.5":"Assuredly", "1.8":"will", "2.1":"lie", "2.4":"But", "2.7":"none", "3.0":"will", "3.3":"pass", "3.6":"the", "3.9":"Catacomb", "4.2":"So", "4.5":"chastened", "4.8":"as", "5.1":"the", "5.4":"Fly", "5.7":"–" },
+        "cues": {
+          "0": "The",
+          "3": "will",
+          "0.3": "Butterfly",
+          "0.6": "in",
+          "0.9": "honored",
+          "1.2": "Dust",
+          "1.5": "Assuredly",
+          "1.8": "will",
+          "2.1": "lie",
+          "2.4": "But",
+          "2.7": "none",
+          "3.3": "pass",
+          "3.6": "the",
+          "3.9": "Catacomb",
+          "4.2": "So",
+          "4.5": "chastened",
+          "4.8": "as",
+          "5.1": "the",
+          "5.4": "Fly",
+          "5.7": "–"
+        },
         "link": "https://allpoetry.com/poem/14326738-The-Butterfly-In-honored-Dust-by-Emily-Dickinson"
       }
     },
@@ -46,9 +67,9 @@
         "xshift": 0,
         "yshift": 0
       },
-      "h": 82.01971373639282,
-      "s": 0.6857935819064761,
-      "v": 0.6207917129115794,
+      "h": 326.20324231360803,
+      "s": 0.3245001174578739,
+      "v": 0.7400054466230929,
       "media": {
         "type": "gif",
         "url": "https://media4.giphy.com/media/Xt9sp4CHeXDmpyFH3P/200.gif",
@@ -63,16 +84,13 @@
         "xshift": 0,
         "yshift": 0
       },
-      "h": 163.36015124846602,
-      "s": 0.9558723311898327,
-      "v": 0.6797190517998246,
+      "h": 197.98344627936277,
+      "s": 0.7025163366916096,
+      "v": 0.9244553376906313,
       "media": {
-        "type": "youtube", 
-        "url": "https://youtu.be/gaN3pxkOgDY",
-        "volume": 50, 
-        "start": 18, 
-        "end": 61, 
-        "speed": 1 
+        "type": "gif",
+        "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExeGtmdGFkbzduem85d3N0bnAzeXZkamxqN2w1aXJ1dmFtdnI5ZXNybSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9TZf1cjD2iDSEgrb4O/giphy.gif",
+        "link": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExeGtmdGFkbzduem85d3N0bnAzeXZkamxqN2w1aXJ1dmFtdnI5ZXNybSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9TZf1cjD2iDSEgrb4O/giphy.gif"
       }
     },
     null,
