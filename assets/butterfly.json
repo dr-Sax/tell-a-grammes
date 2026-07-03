@@ -67,9 +67,12 @@
       "s": 0.9558723311898327,
       "v": 0.6797190517998246,
       "media": {
-        "type": "gif",
-        "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExZzJqdzA1a2hlaWl4NWE2dHN3Y29peDZleGMwOGJkc3QxdTNwdHcxdyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/11T1gShHejUvPW/giphy.gif",
-        "link": "https://www.tacobell.com/"
+        "type": "youtube", 
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "volume": 80, 
+        "start": 12, 
+        "end": 34, 
+        "speed": 1 
       }
     },
     null,
