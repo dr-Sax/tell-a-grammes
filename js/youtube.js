@@ -160,12 +160,6 @@ function createYouTube(i, cfg) {
         },
       },
     });
-    rec._timer = setInterval(() => {
-      const p = rec.player;
-      if (!p || !p.getCurrentTime || rec.end == null) return;
-      let t = 0; try { t = p.getCurrentTime(); } catch (_) { return; }
-      if (t >= rec.end) { try { p.seekTo(rec.start || 0, true); } catch (_) {} }
-    }, 200);
   });
 
   return rec;
@@ -232,14 +226,28 @@ export function syncYouTubeOverlays(MW, MH) {
 function setPlaying(m, on) {
   m.wrap.style.display = on ? 'block' : 'none';
   const p = m.player;
-  if (!p || !p.getPlayerState) return;              // not ready yet — a later frame reconciles
+  if (!p || !p.getPlayerState) return;
   const S = window.YT && window.YT.PlayerState;
   if (!S) return;
   let st; try { st = p.getPlayerState(); } catch (e) { return; }
+
   if (on) {
+    // Seek to `start` the first time this player actually begins playing, so
+    // resume lands on the segment head rather than wherever muted-autoplay left
+    // the playhead. _seeked latches until a real loss clears it (below).
+    if (!m._seeked && (st === S.PLAYING || st === S.BUFFERING)) {
+      m._seeked = true;
+      try { p.seekTo(m.start || 0, true); } catch (e) {}
+    }
+    // Per-frame end clamp: authoritative, and far tighter than a 200ms timer.
+    if (m.end != null && (st === S.PLAYING || st === S.BUFFERING)) {
+      let t = 0; try { t = p.getCurrentTime(); } catch (e) {}
+      if (t >= m.end) { try { p.seekTo(m.start || 0, true); } catch (e) {} }
+    }
     if (st !== S.PLAYING && st !== S.BUFFERING) { try { p.playVideo(); } catch (e) {} }
   } else {
-    if (st === S.PLAYING || st === S.BUFFERING)  { try { p.pauseVideo(); } catch (e) {} }
+    if (st === S.PLAYING || st === S.BUFFERING) { try { p.pauseVideo(); } catch (e) {} }
+    m._seeked = false;   // next reappearance re-seeks to start
   }
 }
 
