@@ -6,6 +6,7 @@ import { state } from './state.js';
 import { statusEl } from './dom.js';
 import { isGif, loadGif } from './gif.js';
 import { parseCues } from './caption.js';
+import { parseYouTube, attachYouTube } from './youtube.js';
 
 // per piece: { type:'image'|'video'|'gif'|'caption', el, url, name, sourceURL,
 //              link, stop?, cues? } or null
@@ -145,6 +146,8 @@ export function loadMediaFile(i, file, refresh) {
 // or broken URL can't silently race the rest) — so it does NOT swallow
 // rejections; callers should catch per-piece.
 export async function loadMediaFromURL(i, url, refresh) {
+  if (parseYouTube(url)) { attachYouTube(i, url, {}, refresh); return; }
+
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
