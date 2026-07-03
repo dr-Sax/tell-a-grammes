@@ -61,8 +61,6 @@ function processFrame(now) {
         drawOverlay(state.smoothHulls[i], i, MW, MH);
       }
       syncYouTubeOverlays(MW, MH);   // ← must be inside processFrame, after the for-loop
-      renderDebugBar(counts);
-      requestAnimationFrame(processFrame);
       continue;
     }
 
