@@ -6,18 +6,14 @@
 import { PIECES } from './config.js';
 import { state } from './state.js';
 import { rgb2hsv } from './hsv.js';
-import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel } from './dom.js';
+import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel, clientToCanvasPoint } from './dom.js';
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
 import { pieceMedia } from './media.js';
 import { buildUI } from './ui.js';
 
 function calibrateAt(clientX, clientY) {
   if (state.calibrating < 0 || !state.running) return;
-  const rect = mainCanvas.getBoundingClientRect();
-  const scaleX = readCanvas.width  / rect.width;
-  const scaleY = readCanvas.height / rect.height;
-  const px = Math.round((clientX - rect.left) * scaleX);
-  const py = Math.round((clientY - rect.top)  * scaleY);
+  const [px, py] = clientToCanvasPoint(clientX, clientY, readCanvas, { round: true });
 
   // sample a patch around the tap from the proc-res read canvas
   drawOriented(readCtx, readCanvas.width, readCanvas.height);
@@ -91,11 +87,7 @@ function ensureReadout() {
 
 function updateReadout(clientX, clientY) {
   const el = ensureReadout();
-  const rect = mainCanvas.getBoundingClientRect();
-  const scaleX = readCanvas.width  / rect.width;
-  const scaleY = readCanvas.height / rect.height;
-  const px = Math.round((clientX - rect.left) * scaleX);
-  const py = Math.round((clientY - rect.top)  * scaleY);
+  const [px, py] = clientToCanvasPoint(clientX, clientY, readCanvas, { round: true });
   if (px < 0 || py < 0 || px >= readCanvas.width || py >= readCanvas.height) {
     el.style.display = 'none';
     return;

@@ -1,13 +1,13 @@
 // ── media links: tap-to-open per-piece URLs ────────────────────────────────────
 // If a piece's media has a `link` set (independent of the media asset's own
-// URL — see calibration.js's getCalData/applyCalData, and the ↗ link button
+// URL — see configIO.js's getCalData/applyCalData, and the ↗ link button
 // in ui.js), tapping/clicking that piece's rendered overlay opens it in a new
 // tab. Hit-testing uses the same smoothed hulls render.js draws from, so
 // "tap the piece" means the same thing here as it visually looks like.
 
 import { state } from './state.js';
 import { N } from './config.js';
-import { mainCanvas } from './dom.js';
+import { mainCanvas, clientToCanvasPoint } from './dom.js';
 import { pieceMedia } from './media.js';
 import { pointInPolygon } from './geometry.js';
 
@@ -28,11 +28,7 @@ function hitPiece(x, y) {
 // calibrating, so calibration taps are never mistaken for link taps.
 function openIfLinked(clientX, clientY) {
   if (state.calibrating >= 0) return false;
-  const rect = mainCanvas.getBoundingClientRect();
-  const scaleX = mainCanvas.width / rect.width;
-  const scaleY = mainCanvas.height / rect.height;
-  const x = (clientX - rect.left) * scaleX;
-  const y = (clientY - rect.top) * scaleY;
+  const [x, y] = clientToCanvasPoint(clientX, clientY, mainCanvas);
 
   const i = hitPiece(x, y);
   if (i < 0) return false;
@@ -47,7 +43,7 @@ export function wireMediaLinks() {
   // Desktop / mouse.
   mainCanvas.addEventListener('click', e => { openIfLinked(e.clientX, e.clientY); });
 
-  // Touch: handled on touchend (matches calibration.js's own tap handling),
+  // Touch: handled on touchend (matches calibrate.js's own tap handling),
   // and preventDefault only when a link actually opened — that suppresses
   // the trailing synthetic click a touchend normally generates, so the link
   // doesn't fire twice. Left alone (no preventDefault) when nothing was hit,
