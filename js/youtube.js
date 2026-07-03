@@ -13,6 +13,14 @@
 //   its nearest allowed rate). Autoplay always starts muted (browser policy);
 //   the first tap anywhere unmutes to `volume` — same ergonomics as the
 //   "tap the video area once to start" path the local <video> type already uses.
+//
+// Playback is TRANSITION-driven, not read-driven: play/pause/seek fire off our
+// own tracked/untracked edge (state.smoothHulls[i] going non-null <-> null),
+// never off a getPlayerState() read. That read goes over the same postMessage
+// bridge that's known-flaky cross-origin (see the console warning YouTube
+// itself logs); gating start-seek or end-clamp behind it silently swallows
+// both if the bridge lags or sticks. Our own `_playing` flag is authoritative
+// instead — see setPlaying().
 
 import { N, PIECES } from './config.js';
 import { state } from './state.js';
@@ -86,6 +94,8 @@ function ensureLayer() {
 // ── first-gesture audio unlock ────────────────────────────────────────────────
 // Muted autoplay is guaranteed; sound needs a user gesture. Arm once the first
 // YT piece exists; any tap then unmutes every YT piece to its configured volume.
+// This does NOT force playback — play/pause is owned entirely by tracking (see
+// setPlaying), so a tap while a piece is off-camera won't start a hidden video.
 let audioArmed = false;
 function armAudio() {
   if (audioArmed) return;
@@ -127,9 +137,13 @@ function createYouTube(i, cfg) {
     sourceURL: null, link: null,
     videoId, srcURL: cfg.url || ('https://youtu.be/' + videoId),
     volume, start, end, speed,
-    wrap, stage, player: null, _timer: null,
+    wrap, stage, player: null,
+    // Desired play state, driven purely by tracking transitions (see
+    // setPlaying). Set even before the underlying YT.Player finishes
+    // loading, so onReady below can honor whatever was requested in the
+    // meantime instead of always starting paused-at-start.
+    _playing: false,
     stop() {
-      if (this._timer) { clearInterval(this._timer); this._timer = null; }
       try { this.player && this.player.destroy && this.player.destroy(); } catch (e) {}
       try { this.wrap.remove(); } catch (e) {}
     },
@@ -140,20 +154,37 @@ function createYouTube(i, cfg) {
       videoId,
       width: '100%', height: '100%',
       playerVars: {
-        autoplay: 1, controls: 1, mute: 1, playsinline: 1, rel: 0,
-        modestbranding: 1, fs: 0, disablekb: 1, origin: location.origin,
-        start: Math.max(0, Math.floor(start)),
-        ...(end != null ? { end: Math.ceil(end) } : {}),
+        controls: 1, playsinline: 1, rel: 0, modestbranding: 1, fs: 0,
+        disablekb: 1, origin: location.origin, mute: 1,
+        // no autoplay/start/end here — driven explicitly via the JS API
+        // below instead. playerVars' `end` in particular is unreliable
+        // across browsers; explicit seekTo()/pauseVideo() calls are the
+        // trustworthy path.
       },
       events: {
         onReady: e => {
           const p = e.target;
-          try { p.setPlaybackRate(speed); p.setVolume(volume); } catch (_) {}
+          try {
+            p.setPlaybackRate(speed);
+            p.setVolume(volume);
+            if (rec._playing) {
+              // already tracked by the time the player finished loading —
+              // start right where the frame loop wanted it to.
+              p.seekTo(rec.start || 0, true);
+              p.playVideo();
+            } else {
+              // not tracked yet — cue (load, stay paused) at start so the
+              // first real play doesn't stall on a cold load.
+              p.cueVideoById({ videoId, startSeconds: rec.start || 0 });
+            }
+          } catch (_) {}
         },
         onStateChange: e => {
-          // ENDED → loop back to `start` (segment loop, or whole-video loop
-          // when no end was set). The interval below is the belt-and-suspenders
-          // for `end`, whose playerVars precision is coarse.
+          // ENDED → loop back to `start` (whole-video loop case, i.e. no
+          // `end` set — or a backstop if a frame was missed right as a
+          // segment's natural end coincided with the video's real end).
+          // Pushed by the SDK, not polled, so this fires reliably even if
+          // getCurrentTime() reads are lagging.
           if (e.data === YT.PlayerState.ENDED) {
             try { e.target.seekTo(rec.start || 0, true); e.target.playVideo(); } catch (_) {}
           }
@@ -213,41 +244,43 @@ export function syncYouTubeOverlays(MW, MH) {
     const m = pieceMedia[i];
     if (!m || m.type !== 'youtube' || !m.wrap) continue;
     const hull = state.smoothHulls[i];
-    if (!hull || hull.length < 3) { setPlaying(m, false); continue; }   // ← was display='none'
+    if (!hull || hull.length < 3) { setPlaying(m, false); continue; }
     positionYT(i, m, hull, scale, baseX, baseY, calibrating);
     setPlaying(m, true);
   }
 }
 
-// Show/hide + play/pause on transitions only — never every frame, which would
-// flood the player's postMessage bridge. Brief dropouts are absorbed by
-// main.js's grace period (smoothHulls stays non-null), so only a real loss
-// pauses. Resumes from the same spot, mirroring the caption pause/resume model.
+// Transition-driven, not state-read-driven: fires seek+play / pause exactly
+// once per actual on/off edge, comparing against our OWN last-known
+// `_playing` flag rather than asking the player to confirm its state first
+// (getPlayerState() goes over the same postMessage bridge that can lag or
+// stick cross-origin, and gating on it was silently swallowing both the
+// start-seek and the end-clamp). If the player hasn't finished loading yet
+// when a transition fires, onReady (above) picks up `_playing` and starts it
+// correctly once ready.
 function setPlaying(m, on) {
   m.wrap.style.display = on ? 'block' : 'none';
-  const p = m.player;
-  if (!p || !p.getPlayerState) return;
-  const S = window.YT && window.YT.PlayerState;
-  if (!S) return;
-  let st; try { st = p.getPlayerState(); } catch (e) { return; }
 
-  if (on) {
-    // Seek to `start` the first time this player actually begins playing, so
-    // resume lands on the segment head rather than wherever muted-autoplay left
-    // the playhead. _seeked latches until a real loss clears it (below).
-    if (!m._seeked && (st === S.PLAYING || st === S.BUFFERING)) {
-      m._seeked = true;
-      try { p.seekTo(m.start || 0, true); } catch (e) {}
+  if (on !== m._playing) {
+    m._playing = on;
+    const p = m.player;
+    if (p) {
+      try {
+        if (on) { p.seekTo(m.start || 0, true); p.playVideo(); }
+        else p.pauseVideo();
+      } catch (e) {}
     }
-    // Per-frame end clamp: authoritative, and far tighter than a 200ms timer.
-    if (m.end != null && (st === S.PLAYING || st === S.BUFFERING)) {
-      let t = 0; try { t = p.getCurrentTime(); } catch (e) {}
-      if (t >= m.end) { try { p.seekTo(m.start || 0, true); } catch (e) {} }
-    }
-    if (st !== S.PLAYING && st !== S.BUFFERING) { try { p.playVideo(); } catch (e) {} }
-  } else {
-    if (st === S.PLAYING || st === S.BUFFERING) { try { p.pauseVideo(); } catch (e) {} }
-    m._seeked = false;   // next reappearance re-seeks to start
+    return;
+  }
+
+  // steady-state while playing: enforce the end clamp every frame. This read
+  // (getCurrentTime) does use the bridge, but unlike the old gate it's no
+  // longer load-bearing for start/play/pause — worst case here is a segment
+  // playing a little past `end` if the bridge is lagging, not silently never
+  // looping at all.
+  if (on && m.end != null && m.player && m.player.getCurrentTime) {
+    let t = 0; try { t = m.player.getCurrentTime(); } catch (e) { return; }
+    if (t >= m.end) { try { m.player.seekTo(m.start || 0, true); } catch (e) {} }
   }
 }
 
