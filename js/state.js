@@ -47,4 +47,12 @@ export const state = {
   // +stereoAngle and the right eye by -stereoAngle (about each half's own
   // center) to correct for viewer/lens misalignment. 0 = no adjustment.
   stereoAngle: 0,
+
+  // Per-eye horizontal crop-position correction, as a fraction of frame width.
+  // Compensates for the physical camera lens being offset from the phone's
+  // center — that offset reads as a horizontal shift once the same source
+  // frame is duplicated into a stereo pair, and flips sign when the phone is
+  // rotated to the other landscape orientation.
+  stereoShiftL: 0,
+  stereoShiftR: 0,
 };

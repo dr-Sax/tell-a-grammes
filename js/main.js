@@ -16,6 +16,24 @@ import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 
+// Draws one eye's half of stereoCanvas: mainCanvas's finished frame, shifted
+// horizontally by `shiftFrac` (fraction of MW, corrects for the camera lens
+// sitting off-center from the phone's display) and rotated by `angleRad`
+// about its own half's center (corrects toe-in/out convergence). Clipped to
+// exactly this half's rect first, so a shift large enough to push the image
+// edge inward can't bleed into the other eye's half — it just crops, which is
+// the intended "change the cropping focus position" behaviour.
+function drawStereoEye(destX, MW, MH, shiftFrac, angleRad) {
+  stereoCtx.save();
+  stereoCtx.beginPath();
+  stereoCtx.rect(destX, 0, MW, MH);
+  stereoCtx.clip();
+  stereoCtx.translate(destX + MW / 2 + shiftFrac * MW, MH / 2);
+  stereoCtx.rotate(angleRad);
+  stereoCtx.drawImage(mainCanvas, -MW / 2, -MH / 2);
+  stereoCtx.restore();
+}
+
 function processFrame(now) {
   if (!state.running) return;
 
@@ -95,11 +113,12 @@ function processFrame(now) {
   renderDebugBar(counts);
 
   // Stereo compositing: mirror the finished mainCanvas frame into both halves
-  // of stereoCanvas, each rotated by ±state.stereoAngle about its own center
-  // to correct convergence for the viewer being used. This runs AFTER every
-  // overlay/detection has already been drawn onto mainCanvas above, so
-  // nothing in tracker.js/render.js/geometry.js needs to know stereo mode
-  // exists at all — it's purely a post-process of the finished single-eye frame.
+  // of stereoCanvas. Runs AFTER every overlay/detection has already been
+  // drawn onto mainCanvas above, so nothing in tracker.js/render.js/
+  // geometry.js needs to know stereo mode exists at all — it's purely a
+  // post-process of the finished single-eye frame. Each eye gets its own
+  // horizontal shift (crop-position correction for the off-center camera
+  // lens) and its own rotation (convergence angle) — see drawStereoEye.
   if (state.stereo) {
     if (stereoCanvas.width !== MW * 2 || stereoCanvas.height !== MH) {
       stereoCanvas.width  = MW * 2;
@@ -107,21 +126,8 @@ function processFrame(now) {
     }
     stereoCtx.clearRect(0, 0, stereoCanvas.width, stereoCanvas.height);
     const rad = state.stereoAngle * Math.PI / 180;
-
-    // left eye — rotated +angle about its own center
-    stereoCtx.save();
-    stereoCtx.translate(MW / 2, MH / 2);
-    stereoCtx.rotate(rad);
-    stereoCtx.drawImage(mainCanvas, -MW / 2, -MH / 2);
-    stereoCtx.restore();
-
-    // right eye — rotated -angle, so both toe in/out symmetrically toward
-    // (or away from) each other as the slider moves off zero.
-    stereoCtx.save();
-    stereoCtx.translate(MW + MW / 2, MH / 2);
-    stereoCtx.rotate(-rad);
-    stereoCtx.drawImage(mainCanvas, -MW / 2, -MH / 2);
-    stereoCtx.restore();
+    drawStereoEye(0,  MW, MH, state.stereoShiftL,  rad);
+    drawStereoEye(MW, MW, MH, state.stereoShiftR, -rad);
   }
 
   requestAnimationFrame(processFrame);

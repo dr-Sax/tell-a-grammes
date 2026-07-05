@@ -52,35 +52,61 @@ export function syncSliders() {
   }
 }
 
-// Single-slider control for stereo eye convergence (±angle applied per eye
-// at compositing time — see main.js). Lives in its own row directly under
-// the HSV tolerance sliders, but is only shown while stereo mode is active
-// (toggled in wireViewControls below) since it has no effect otherwise.
-export function wireStereoSlider() {
-  stereoControlsEl.innerHTML = '';
-
+// One small range control, generic enough to reuse for the three stereo
+// knobs below (angle + per-eye shift). `get`/`set` read/write the backing
+// value; `format` renders the displayed label text.
+function buildStereoRange({ label, min, max, step, get, set, format }) {
   const val = document.createElement('span');
-  val.id = 'stereoAngleVal';
-  val.textContent = state.stereoAngle.toFixed(1) + '°';
+  val.textContent = format(get());
 
-  const label = document.createElement('label');
-  label.append('Eye angle ', val);
+  const lbl = document.createElement('label');
+  lbl.append(label + ' ', val);
 
   const range = document.createElement('input');
   range.type = 'range';
-  range.id = 'stereoAngleRange';
-  range.min = -15; range.max = 15; range.step = 0.5;
-  range.value = state.stereoAngle;
+  range.min = min; range.max = max; range.step = step;
+  range.value = get();
   range.style.flex = '1';
   range.oninput = () => {
-    state.stereoAngle = +range.value;
-    val.textContent = state.stereoAngle.toFixed(1) + '°';
+    set(+range.value);
+    val.textContent = format(get());
   };
 
   const group = document.createElement('div');
   group.className = 'ctrl-group';
-  group.append(label, range);
-  stereoControlsEl.appendChild(group);
+  group.append(lbl, range);
+  return group;
+}
+
+// Stereo eye-convergence angle + independent per-eye horizontal crop shift.
+// Angle corrects toe-in/out; shift corrects the apparent left/right
+// displacement caused by the phone's camera lens sitting off-center from the
+// display — see main.js's compositing step, which is where these values are
+// actually applied. Only shown while stereo mode is active (toggled in
+// wireViewControls below), since none of it has any effect otherwise.
+export function wireStereoSlider() {
+  stereoControlsEl.innerHTML = '';
+
+  stereoControlsEl.append(
+    buildStereoRange({
+      label: 'Eye angle', min: -15, max: 15, step: 0.5,
+      get: () => state.stereoAngle,
+      set: v => { state.stereoAngle = v; },
+      format: v => v.toFixed(1) + '°',
+    }),
+    buildStereoRange({
+      label: 'L shift', min: -0.3, max: 0.3, step: 0.005,
+      get: () => state.stereoShiftL,
+      set: v => { state.stereoShiftL = v; },
+      format: v => Math.round(v * 100) + '%',
+    }),
+    buildStereoRange({
+      label: 'R shift', min: -0.3, max: 0.3, step: 0.005,
+      get: () => state.stereoShiftR,
+      set: v => { state.stereoShiftR = v; },
+      format: v => Math.round(v * 100) + '%',
+    }),
+  );
 }
 
 function conflictsWith(i) {
@@ -202,7 +228,7 @@ export function wireViewControls() {
   // aspect-ratio to double-wide (canvasWrap is sized purely by CSS
   // aspect-ratio now — see styles.css/camera.js — so this has to be kept in
   // sync by hand whenever which canvas is showing changes), and reveals the
-  // eye-angle slider row.
+  // angle/shift slider row.
   const stereoBtn = $('stereoBtn');
   stereoBtn.onclick = () => {
     state.stereo = !state.stereo;
