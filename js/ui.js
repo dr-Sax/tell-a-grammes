@@ -6,7 +6,7 @@
 import { PIECES, N, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
-import { tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $, mainCanvas, stereoCanvas} from './dom.js';
+import { tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $, mainCanvas, stereoCanvas, canvasWrap } from './dom.js';
 import { buildMediaRow } from './ui-media.js';
 
 // Builds the detection-tolerance controls (#controls) from TOL_SLIDERS —
@@ -163,11 +163,19 @@ export function wireViewControls() {
     feedBtn.classList.toggle('active', !state.showFeed);
   };
 
+  // Stereo mode swaps which canvas is visible AND flips canvasWrap's
+  // aspect-ratio to double-wide. The aspect-ratio flip matters: canvasWrap no
+  // longer gets its size from an in-flow child (see styles.css), so hiding
+  // mainCanvas without also updating the ratio would leave canvasWrap sized
+  // for a single eye while stereoCanvas tries to render two side by side.
   const stereoBtn = $('stereoBtn');
   stereoBtn.onclick = () => {
     state.stereo = !state.stereo;
     mainCanvas.style.display   = state.stereo ? 'none'  : 'block';
     stereoCanvas.style.display = state.stereo ? 'block' : 'none';
+    const w = mainCanvas.width  || 4;
+    const h = mainCanvas.height || 3;
+    canvasWrap.style.aspectRatio = state.stereo ? `${w * 2} / ${h}` : `${w} / ${h}`;
     stereoBtn.classList.toggle('active', state.stereo);
     stereoBtn.textContent = state.stereo ? '👓 stereo on' : '👓 stereo';
   };

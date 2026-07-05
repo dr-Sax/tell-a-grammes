@@ -6,6 +6,7 @@ export const mainCanvas  = document.getElementById('mainCanvas');
 export const mainCtx     = mainCanvas.getContext('2d', { willReadFrequently: false });
 export const stereoCanvas = document.getElementById('stereoCanvas');
 export const stereoCtx    = stereoCanvas.getContext('2d');
+export const canvasWrap = document.getElementById('canvasWrap');
 export const tapHint     = document.getElementById('tapHint');
 export const crosshair   = document.getElementById('crosshair');
 export const statusEl    = document.getElementById('status');

@@ -4,7 +4,7 @@
 import { PROC_TARGET_W, N } from './config.js';
 import { state } from './state.js';
 import { allocBuffers } from './tracker.js';
-import { mainCanvas } from './dom.js';
+import { mainCanvas, canvasWrap } from './dom.js';
 
 export const video = document.createElement('video');
 video.autoplay = true; video.playsInline = true; video.muted = true;
@@ -35,6 +35,15 @@ export function applyOrientation() {
   const MH = video.videoHeight || 480;
   mainCanvas.width = MW;
   mainCanvas.height = MH;
+
+  // canvasWrap is sized purely by CSS aspect-ratio now (see styles.css) —
+  // neither canvas is in-flow, so nothing else gives it a height. Set the
+  // real ratio here once the camera's actual dimensions are known; state.js's
+  // stereo flag decides single-vs-double-wide, so only touch it when NOT in
+  // stereo mode (the stereo toggle in ui.js owns the doubled ratio while
+  // active, and will read these same MW/MH next time it's toggled off).
+  if (!state.stereo) canvasWrap.style.aspectRatio = `${MW} / ${MH}`;
+
   const procScale = Math.min(1, PROC_TARGET_W / MW);
   const PW = Math.max(1, Math.round(MW * procScale));
   const PH = Math.max(1, Math.round(MH * procScale));
