@@ -6,7 +6,7 @@
 import { PIECES, N, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
-import { tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $ } from './dom.js';
+import { tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $, mainCanvas, stereoCanvas} from './dom.js';
 import { buildMediaRow } from './ui-media.js';
 
 // Builds the detection-tolerance controls (#controls) from TOL_SLIDERS —
@@ -161,5 +161,14 @@ export function wireViewControls() {
     state.showFeed = !state.showFeed;
     feedBtn.textContent = state.showFeed ? '📷 feed on' : '⬜ feed off';
     feedBtn.classList.toggle('active', !state.showFeed);
+  };
+
+  const stereoBtn = $('stereoBtn');
+  stereoBtn.onclick = () => {
+    state.stereo = !state.stereo;
+    mainCanvas.style.display   = state.stereo ? 'none'  : 'block';
+    stereoCanvas.style.display = state.stereo ? 'block' : 'none';
+    stereoBtn.classList.toggle('active', state.stereo);
+    stereoBtn.textContent = state.stereo ? '👓 stereo on' : '👓 stereo';
   };
 }

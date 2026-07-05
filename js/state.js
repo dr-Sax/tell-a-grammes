@@ -37,4 +37,9 @@ export const state = {
   lastFrameTime: 0,  // previous frame's rAF timestamp (ms) for delta-time
 
   showFeed: true,     // camera feed vs. white lightbox behind overlays
+
+  // Stereoscopic display: mirrors mainCanvas into a side-by-side double-wide
+  // canvas for use with a phone-based stereo viewer. Assumes landscape;
+  // no orientation handling is done, by design (keep this simple).
+  stereo: false,
 };

@@ -4,7 +4,7 @@
 import { PIECES, N, LERP, MISS_GRACE_FRAMES } from './config.js';
 import { state } from './state.js';
 import { matchAndLerp } from './geometry.js';
-import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls, panelToggle, overlayPanel } from './dom.js';
+import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls, panelToggle, overlayPanel, stereoCanvas, stereoCtx  } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { computeHSV, detectPiece } from './tracker.js';
 import { drawOverlay, renderDebugBar } from './render.js';
@@ -90,6 +90,15 @@ function processFrame(now) {
     drawOverlay(state.smoothHulls[i], i, MW, MH);
   }
   renderDebugBar(counts);
+
+  if (state.stereo) {
+    if (stereoCanvas.width !== MW * 2 || stereoCanvas.height !== MH) {
+      stereoCanvas.width  = MW * 2;
+      stereoCanvas.height = MH;
+    }
+    stereoCtx.drawImage(mainCanvas, 0, 0);
+    stereoCtx.drawImage(mainCanvas, MW, 0);
+  }
   requestAnimationFrame(processFrame);
 }
 

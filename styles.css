@@ -87,8 +87,12 @@ body.immersive #mainCanvas {
 }
 body.immersive #exitFs { display: block; }
 
+#stereoCanvas { display: none; width: 100%; cursor: default; }
+
+body.immersive #stereoCanvas { width: 100%; height: 100%; object-fit: cover; }
 /* panel toggle — lives inside canvasWrap (like #exitFs) so it survives
    immersive mode; JS shows it once the camera is running. */
+   
 #panelToggle {
   display: none; position: absolute; z-index: 1001;
   top: calc(env(safe-area-inset-top, 0px) + 10px); left: 12px;
