@@ -12,7 +12,6 @@ import { buildUI, syncSliders, wireSliders, wireViewControls } from './ui.js';
 import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
-import { syncYouTubeOverlays } from './youtube.js';   // top, with other imports
 
 function processFrame(now) {
   if (!state.running) return;
@@ -90,7 +89,6 @@ function processFrame(now) {
     state.smoothHulls[i] = matchAndLerp(state.smoothHulls[i], poly, lerpThis);
     drawOverlay(state.smoothHulls[i], i, MW, MH);
   }
-  syncYouTubeOverlays(MW, MH);   // ← must be inside processFrame, after the for-loop
   renderDebugBar(counts);
   requestAnimationFrame(processFrame);
 }
