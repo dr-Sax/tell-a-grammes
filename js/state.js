@@ -42,4 +42,9 @@ export const state = {
   // canvas for use with a phone-based stereo viewer. Assumes landscape;
   // no orientation handling is done, by design (keep this simple).
   stereo: false,
+
+  // Stereo eye-convergence adjustment, in degrees. Rotates the left eye by
+  // +stereoAngle and the right eye by -stereoAngle (about each half's own
+  // center) to correct for viewer/lens misalignment. 0 = no adjustment.
+  stereoAngle: 0,
 };

@@ -1,12 +1,16 @@
 // ── UI: piece rows + view controls ────────────────────────────────────────────
 // Builds the per-piece list, wires the tolerance sliders, and the view
-// controls (feed / fullscreen). Calibration sampling lives in calibrate.js;
-// save/load in configIO.js; per-piece media/framing controls in ui-media.js.
+// controls (feed / fullscreen / stereo). Calibration sampling lives in
+// calibrate.js; save/load in configIO.js; per-piece media/framing controls in
+// ui-media.js.
 
 import { PIECES, N, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
-import { tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $, mainCanvas, stereoCanvas, canvasWrap } from './dom.js';
+import {
+  tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $,
+  mainCanvas, stereoCanvas, canvasWrap, stereoControlsEl,
+} from './dom.js';
 import { buildMediaRow } from './ui-media.js';
 
 // Builds the detection-tolerance controls (#controls) from TOL_SLIDERS —
@@ -46,6 +50,37 @@ export function syncSliders() {
     if (range) range.value = params[s.key];
     if (val) val.textContent = params[s.key];
   }
+}
+
+// Single-slider control for stereo eye convergence (±angle applied per eye
+// at compositing time — see main.js). Lives in its own row directly under
+// the HSV tolerance sliders, but is only shown while stereo mode is active
+// (toggled in wireViewControls below) since it has no effect otherwise.
+export function wireStereoSlider() {
+  stereoControlsEl.innerHTML = '';
+
+  const val = document.createElement('span');
+  val.id = 'stereoAngleVal';
+  val.textContent = state.stereoAngle.toFixed(1) + '°';
+
+  const label = document.createElement('label');
+  label.append('Eye angle ', val);
+
+  const range = document.createElement('input');
+  range.type = 'range';
+  range.id = 'stereoAngleRange';
+  range.min = -15; range.max = 15; range.step = 0.5;
+  range.value = state.stereoAngle;
+  range.style.flex = '1';
+  range.oninput = () => {
+    state.stereoAngle = +range.value;
+    val.textContent = state.stereoAngle.toFixed(1) + '°';
+  };
+
+  const group = document.createElement('div');
+  group.className = 'ctrl-group';
+  group.append(label, range);
+  stereoControlsEl.appendChild(group);
 }
 
 function conflictsWith(i) {
@@ -125,7 +160,7 @@ export function buildUI() {
   });
 }
 
-// ── view controls: feed / fullscreen ──────────────────────────────────────────
+// ── view controls: feed / fullscreen / stereo ─────────────────────────────────
 export function wireViewControls() {
   panelToggle.onclick = () => overlayPanel.classList.toggle('open');
 
@@ -163,16 +198,17 @@ export function wireViewControls() {
     feedBtn.classList.toggle('active', !state.showFeed);
   };
 
-  // Stereo mode swaps which canvas is visible AND flips canvasWrap's
-  // aspect-ratio to double-wide. The aspect-ratio flip matters: canvasWrap no
-  // longer gets its size from an in-flow child (see styles.css), so hiding
-  // mainCanvas without also updating the ratio would leave canvasWrap sized
-  // for a single eye while stereoCanvas tries to render two side by side.
+  // Stereo mode swaps which canvas is visible, flips canvasWrap's
+  // aspect-ratio to double-wide (canvasWrap is sized purely by CSS
+  // aspect-ratio now — see styles.css/camera.js — so this has to be kept in
+  // sync by hand whenever which canvas is showing changes), and reveals the
+  // eye-angle slider row.
   const stereoBtn = $('stereoBtn');
   stereoBtn.onclick = () => {
     state.stereo = !state.stereo;
     mainCanvas.style.display   = state.stereo ? 'none'  : 'block';
     stereoCanvas.style.display = state.stereo ? 'block' : 'none';
+    stereoControlsEl.style.display = state.stereo ? 'flex' : 'none';
     const w = mainCanvas.width  || 4;
     const h = mainCanvas.height || 3;
     canvasWrap.style.aspectRatio = state.stereo ? `${w * 2} / ${h}` : `${w} / ${h}`;

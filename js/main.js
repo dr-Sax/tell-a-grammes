@@ -4,11 +4,14 @@
 import { PIECES, N, LERP, MISS_GRACE_FRAMES } from './config.js';
 import { state } from './state.js';
 import { matchAndLerp } from './geometry.js';
-import { mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls, panelToggle, overlayPanel, stereoCanvas, stereoCtx  } from './dom.js';
+import {
+  mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls,
+  panelToggle, overlayPanel, stereoCanvas, stereoCtx,
+} from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { computeHSV, detectPiece } from './tracker.js';
 import { drawOverlay, renderDebugBar } from './render.js';
-import { buildUI, syncSliders, wireSliders, wireViewControls } from './ui.js';
+import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider } from './ui.js';
 import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
@@ -91,14 +94,36 @@ function processFrame(now) {
   }
   renderDebugBar(counts);
 
+  // Stereo compositing: mirror the finished mainCanvas frame into both halves
+  // of stereoCanvas, each rotated by ±state.stereoAngle about its own center
+  // to correct convergence for the viewer being used. This runs AFTER every
+  // overlay/detection has already been drawn onto mainCanvas above, so
+  // nothing in tracker.js/render.js/geometry.js needs to know stereo mode
+  // exists at all — it's purely a post-process of the finished single-eye frame.
   if (state.stereo) {
     if (stereoCanvas.width !== MW * 2 || stereoCanvas.height !== MH) {
       stereoCanvas.width  = MW * 2;
       stereoCanvas.height = MH;
     }
-    stereoCtx.drawImage(mainCanvas, 0, 0);
-    stereoCtx.drawImage(mainCanvas, MW, 0);
+    stereoCtx.clearRect(0, 0, stereoCanvas.width, stereoCanvas.height);
+    const rad = state.stereoAngle * Math.PI / 180;
+
+    // left eye — rotated +angle about its own center
+    stereoCtx.save();
+    stereoCtx.translate(MW / 2, MH / 2);
+    stereoCtx.rotate(rad);
+    stereoCtx.drawImage(mainCanvas, -MW / 2, -MH / 2);
+    stereoCtx.restore();
+
+    // right eye — rotated -angle, so both toe in/out symmetrically toward
+    // (or away from) each other as the slider moves off zero.
+    stereoCtx.save();
+    stereoCtx.translate(MW + MW / 2, MH / 2);
+    stereoCtx.rotate(-rad);
+    stereoCtx.drawImage(mainCanvas, -MW / 2, -MH / 2);
+    stereoCtx.restore();
   }
+
   requestAnimationFrame(processFrame);
 }
 
@@ -126,6 +151,7 @@ startBtn.onclick = async () => {
 
 // ── boot ──────────────────────────────────────────────────────────────────────
 wireSliders();
+wireStereoSlider();
 wireViewControls();
 wireCalibration();
 wireSaveLoad();
