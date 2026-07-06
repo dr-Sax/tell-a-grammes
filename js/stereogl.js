@@ -17,6 +17,7 @@
 // So to find the source texel for a screen point we undo it: src = R(−a)·(screen − shift).
 // The barrel warp is applied first (it lives in screen space, centred on the
 // lens axis); its output is then treated as "screen" for that un-shift/un-rotate.
+// im adding this comment to test the new git diff tool, it should show up in the diff view
 
 let gl = null, prog = null, tex = null, uni = {};
 
@@ -125,5 +126,5 @@ export function renderStereoGL(source, MW, MH, { shiftL, shiftR, angle, k1, k2 }
   gl.uniform1f(uni.uShift, shiftR);
   gl.uniform1f(uni.uAngle, -angle);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  
+
 }
