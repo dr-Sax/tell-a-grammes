@@ -6,7 +6,7 @@ import { state } from './state.js';
 import { matchAndLerp } from './geometry.js';
 import {
   mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls,
-  panelToggle, overlayPanel, stereoCanvas, stereoCtx,
+  panelToggle, overlayPanel, stereoCanvas,
 } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { computeHSV, detectPiece } from './tracker.js';
@@ -15,32 +15,10 @@ import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider }
 import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
-
-// Draws one eye's half of stereoCanvas: mainCanvas's finished frame, shifted
-// horizontally by `shiftFrac` (fraction of MW, corrects for the camera lens
-// sitting off-center from the phone's display) and rotated by `angleRad`
-// about its own half's center (corrects toe-in/out convergence). Clipped to
-// exactly this half's rect first, so a shift large enough to push the image
-// edge inward can't bleed into the other eye's half — it just crops, which is
-// the intended "change the cropping focus position" behaviour.
-function drawStereoEye(destX, MW, MH, shiftFrac, angleRad) {
-  stereoCtx.save();
-  stereoCtx.beginPath();
-  stereoCtx.rect(destX, 0, MW, MH);
-  stereoCtx.clip();
-  stereoCtx.translate(destX + MW / 2 + shiftFrac * MW, MH / 2);
-  stereoCtx.rotate(angleRad);
-  stereoCtx.drawImage(mainCanvas, -MW / 2, -MH / 2);
-  stereoCtx.restore();
-}
+import { renderStereoGL } from './stereoGL.js';
 
 function processFrame(now) {
   if (!state.running) return;
-
-  // Delta-time for the per-piece caption clocks. rAF passes a DOMHighResTimeStamp
-  // (same origin as performance.now); the very first call comes in argument-less
-  // from the start handler, so fall back. Clamp so a backgrounded tab — where
-  // rAF stalls and resumes with a huge gap — can't skip the captions ahead.
   const t = (typeof now === 'number') ? now : performance.now();
   const dt = state.lastFrameTime ? Math.min(0.25, (t - state.lastFrameTime) / 1000) : 0;
   state.lastFrameTime = t;
@@ -52,8 +30,6 @@ function processFrame(now) {
   drawOriented(readCtx, PW, PH);
   computeHSV(readCtx.getImageData(0, 0, PW, PH).data, PW * PH);
 
-  // background: live feed, or a white lightbox (detection reads the proc buffer
-  // either way, so the choice doesn't affect tracking).
   if (state.showFeed) drawOriented(mainCtx, MW, MH);
   else { mainCtx.fillStyle = '#fff'; mainCtx.fillRect(0, 0, MW, MH); }
 
@@ -68,16 +44,10 @@ function processFrame(now) {
     if (!found) {
       state.missStreak[i]++;
       if (state.missStreak[i] > MISS_GRACE_FRAMES) {
-        // real loss (piece removed, or gone long enough to stop trusting the
-        // last position) — clear so the next hit re-acquires from scratch.
         state.smoothHulls[i] = null;
         state.smoothArea[i] = 0;
         state.lastCentroid[i] = null;
       } else if (state.smoothHulls[i]) {
-        // brief dropout — e.g. a hand passing over the piece for a frame or
-        // two. Hold the last known shape on screen instead of letting the
-        // overlay flicker off; lastCentroid is left untouched so detection
-        // keeps searching near where the piece actually is.
         drawOverlay(state.smoothHulls[i], i, MW, MH);
       }
       continue;
@@ -86,19 +56,11 @@ function processFrame(now) {
 
     state.missStreak[i] = 0;
     state.lastCentroid[i] = found.centroid;
-
-    // Detected this frame → advance this piece's caption clock. Pieces that
-    // weren't found hit the `continue` above, so their clock is left untouched
-    // (pause-on-dropout, resume-from-the-same-word). Uncalibrated pieces never
-    // reach here either. This is the whole sync model for captions.
     state.captionElapsed[i] += dt;
 
     counts[i] = found.filled;
     const poly = found.poly.map(p => [p[0] * scaleX, p[1] * scaleY]);
 
-    // stability guard: if this frame's area jumps wildly vs. the running mean
-    // it's likely a partial detection (a momentary gap in the border) — mostly
-    // hold the previous shape instead of snapping to it.
     const prevA = state.smoothArea[i];
     let lerpThis = LERP;
     if (state.smoothHulls[i] && prevA > 0) {
@@ -112,22 +74,15 @@ function processFrame(now) {
   }
   renderDebugBar(counts);
 
-  // Stereo compositing: mirror the finished mainCanvas frame into both halves
-  // of stereoCanvas. Runs AFTER every overlay/detection has already been
-  // drawn onto mainCanvas above, so nothing in tracker.js/render.js/
-  // geometry.js needs to know stereo mode exists at all — it's purely a
-  // post-process of the finished single-eye frame. Each eye gets its own
-  // horizontal shift (crop-position correction for the off-center camera
-  // lens) and its own rotation (convergence angle) — see drawStereoEye.
   if (state.stereo) {
     if (stereoCanvas.width !== MW * 2 || stereoCanvas.height !== MH) {
-      stereoCanvas.width  = MW * 2;
-      stereoCanvas.height = MH;
+      stereoCanvas.width = MW * 2; stereoCanvas.height = MH;
     }
-    stereoCtx.clearRect(0, 0, stereoCanvas.width, stereoCanvas.height);
-    const rad = state.stereoAngle * Math.PI / 180;
-    drawStereoEye(0,  MW, MH, state.stereoShiftL,  rad);
-    drawStereoEye(MW, MW, MH, state.stereoShiftR, -rad);
+    renderStereoGL(mainCanvas, MW, MH, {
+      shiftL: state.stereoShiftL, shiftR: state.stereoShiftR,
+      angle: state.stereoAngle * Math.PI / 180,
+      k1: state.stereoDistort, k2: 0,
+    });
   }
 
   requestAnimationFrame(processFrame);
@@ -165,11 +120,5 @@ wireMediaLinks();
 syncSliders();
 buildUI();
 
-// Optional startup config link: ?config=<url-encoded URL to a config JSON>.
-// Runs before the camera even starts — tolerances/colours/media/framing are
-// all in place by the time "start camera" is pressed, so a shared link can
-// carry a whole setup instead of a manual save-then-load round trip. Same
-// CORS requirement as media URLs: the host has to actually allow cross-origin
-// fetches (see loadConfigFromURL's comment in configIO.js).
 const configURL = new URLSearchParams(location.search).get('config');
 if (configURL) loadConfigFromURL(configURL);

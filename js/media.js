@@ -31,13 +31,6 @@ export function disposeMedia(i) {
   pieceMedia[i] = null;
 }
 
-// Core attach logic, shared by the local-file-picker path (loadMediaFile) and
-// the fetch-by-URL path (loadMediaFromURL) — both just need to hand this a
-// File (a real one from a picker, or one synthesized by wrapping a fetched
-// Blob) plus where it came from. Returns a Promise so callers that need to
-// know when an attach truly finished — e.g. applyCalData loading several
-// pieces' media in sequence — can await it; fire-and-forget callers (the UI)
-// just ignore the returned promise.
 function attachBlob(i, file, refresh, sourceURL = null) {
   return new Promise((resolve, reject) => {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
@@ -101,9 +94,6 @@ function attachBlob(i, file, refresh, sourceURL = null) {
       vid.load();
       const start = () => vid.play().then(() => setMedia('video', vid, url))
         .catch(() => {
-          // Autoplay blocked isn't an attach failure — the media IS attached,
-          // it just needs a user gesture to actually play (see calibration.js's
-          // keepCameraLive, which resumes paused piece videos on any tap).
           setMedia('video', vid, url);
           statusEl.textContent = `${PIECES[i].name}: tap the video area once to start playback`;
         });
@@ -129,21 +119,10 @@ function attachBlob(i, file, refresh, sourceURL = null) {
   });
 }
 
-// Load a picked file onto piece i. `refresh` is invoked (e.g. buildUI) whenever
-// the attachment changes, so the UI can re-render its thumbnail. Fire-and-forget
-// from the caller's point of view — failures already surface via statusEl, so
-// the rejection is swallowed here rather than left as an unhandled promise.
 export function loadMediaFile(i, file, refresh) {
   attachBlob(i, file, refresh, null).catch(() => {});
 }
 
-// Fetch a media asset by URL and attach it to piece i — same type detection,
-// same attach path as a local pick, just sourced from the network. Used both
-// by the per-piece "attach via URL" control and by applyCalData() when
-// loading a startup config's media references. Unlike loadMediaFile, this one
-// is meant to be awaited (applyCalData loads pieces one at a time so a slow
-// or broken URL can't silently race the rest) — so it does NOT swallow
-// rejections; callers should catch per-piece.
 export async function loadMediaFromURL(i, url, refresh, opts={}) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -152,14 +131,6 @@ export async function loadMediaFromURL(i, url, refresh, opts={}) {
   const file = new File([blob], name, { type: blob.type || '' });
   await attachBlob(i, file, refresh, url);
 }
-
-// Attach caption cues directly, with no fetch and no File involved — used
-// when a config embeds cues inline (`media: { type:'caption', cues:{...} }`)
-// rather than referencing a URL. Captions are the one media type small and
-// text-only enough that this makes sense; images/video/gifs still need a
-// real hosted asset. Synchronous (nothing to wait on), but throws the same
-// way attachBlob's caption path does on invalid data, so callers can use the
-// same try/catch they'd use around loadMediaFromURL.
 export function attachCaptionCues(i, cuesRaw, refresh) {
   const cues = parseCues(cuesRaw);
   if (!cues.length) throw new Error('No valid cues in inline caption data');

@@ -55,4 +55,5 @@ export const state = {
   // rotated to the other landscape orientation.
   stereoShiftL: 0,
   stereoShiftR: 0,
+  stereoDistort: 0,   // barrel coefficient: 0 = flat, + = barrel, − = pincushion
 };

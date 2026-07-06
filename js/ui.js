@@ -9,14 +9,13 @@ import { state } from './state.js';
 import { hsvToHex, hueDiff360 } from './hsv.js';
 import {
   tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $,
-  mainCanvas, stereoCanvas, canvasWrap, stereoControlsEl,
+  mainCanvas, stereoCanvas, canvasWrap, stereoControlsEl, statusEl
 } from './dom.js';
 import { buildMediaRow } from './ui-media.js';
+import { initStereoGL } from './stereoGL.js';
 
-// Builds the detection-tolerance controls (#controls) from TOL_SLIDERS —
-// index.html no longer hardcodes these, so this is the only place their
-// min/max/step/default can drift, and it can't drift from config.js's
-// `params` defaults since it reads them directly.
+let glReady = false;
+
 export function wireSliders() {
   controlsEl.innerHTML = '';
   for (const s of TOL_SLIDERS) {
@@ -52,9 +51,6 @@ export function syncSliders() {
   }
 }
 
-// One small range control, generic enough to reuse for the three stereo
-// knobs below (angle + per-eye shift). `get`/`set` read/write the backing
-// value; `format` renders the displayed label text.
 function buildStereoRange({ label, min, max, step, get, set, format }) {
   const val = document.createElement('span');
   val.textContent = format(get());
@@ -78,12 +74,6 @@ function buildStereoRange({ label, min, max, step, get, set, format }) {
   return group;
 }
 
-// Stereo eye-convergence angle + independent per-eye horizontal crop shift.
-// Angle corrects toe-in/out; shift corrects the apparent left/right
-// displacement caused by the phone's camera lens sitting off-center from the
-// display — see main.js's compositing step, which is where these values are
-// actually applied. Only shown while stereo mode is active (toggled in
-// wireViewControls below), since none of it has any effect otherwise.
 export function wireStereoSlider() {
   stereoControlsEl.innerHTML = '';
 
@@ -105,6 +95,12 @@ export function wireStereoSlider() {
       get: () => state.stereoShiftR,
       set: v => { state.stereoShiftR = v; },
       format: v => Math.round(v * 100) + '%',
+    }),
+    buildStereoRange({
+      label: 'Distort', min: -0.5, max: 0.5, step: 0.01,
+      get: () => state.stereoDistort,
+      set: v => { state.stereoDistort = v; },
+      format: v => v.toFixed(2),
     }),
   );
 }
@@ -224,13 +220,13 @@ export function wireViewControls() {
     feedBtn.classList.toggle('active', !state.showFeed);
   };
 
-  // Stereo mode swaps which canvas is visible, flips canvasWrap's
-  // aspect-ratio to double-wide (canvasWrap is sized purely by CSS
-  // aspect-ratio now — see styles.css/camera.js — so this has to be kept in
-  // sync by hand whenever which canvas is showing changes), and reveals the
-  // angle/shift slider row.
+
   const stereoBtn = $('stereoBtn');
   stereoBtn.onclick = () => {
+    if (!state.stereo && !glReady) {
+      glReady = initStereoGL(stereoCanvas);
+      if (!glReady) { statusEl.textContent = 'Stereo needs WebGL — this browser blocked it'; return; }
+    }
     state.stereo = !state.stereo;
     mainCanvas.style.display   = state.stereo ? 'none'  : 'block';
     stereoCanvas.style.display = state.stereo ? 'block' : 'none';

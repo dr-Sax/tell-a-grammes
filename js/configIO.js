@@ -34,11 +34,6 @@ function getCalData() {
       const isCaption = m && m.type === 'caption' && m.cues && m.cues.length;
       const hasMediaURL = m && m.sourceURL && !isCaption;
       const adjustTouched = MEDIA_SLIDERS.some(s => state.mediaAdjust[i][s.key] !== s.def);
-      // export this piece's slot if there's ANYTHING to save for it — colour,
-      // a caption (always exportable), a URL-backed media attachment, or
-      // non-default framing. Gating this on calibration alone (the old
-      // behaviour) silently dropped media for any piece that had media
-      // attached but wasn't calibrated yet.
       if (!c && !isCaption && !hasMediaURL && !adjustTouched) return null;
 
       const out = { name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
@@ -55,11 +50,6 @@ function getCalData() {
   };
 }
 
-// Applies tolerances, colours, and framing synchronously and immediately
-// (buildUI reflects them right away), then fetches any referenced media one
-// piece at a time. Media runs after and separately so a slow or broken URL
-// can't block or fail the fast, important part of the restore. Returns a
-// promise that resolves once every media fetch has settled (success or not).
 async function applyCalData(data) {
   for (const key of ['htol', 'stol', 'vtol', 'minArea'])
     if (data[key] !== undefined) params[key] = data[key];
@@ -115,10 +105,6 @@ async function applyCalData(data) {
 export function wireSaveLoad() {
   $('saveBtn').onclick = () => {
     const data = getCalData();
-    // flag ANY piece whose media isn't URL-backed — checked against pieceMedia
-    // directly, not the export data, so this still catches a piece that has
-    // ONLY local media and nothing else exportable (which getCalData omits
-    // entirely, since there'd be nothing to write for it).
     const missing = PIECES
       .map((p, i) => (pieceMedia[i] && !pieceMedia[i].sourceURL) ? p.name : null)
       .filter(Boolean);
@@ -170,14 +156,6 @@ export function wireSaveLoad() {
   };
 }
 
-// Fetch a config JSON by URL and apply it — same restore path as picking a
-// file with loadBtn, just sourced from the network instead of disk. Meant
-// for a boot-time link like `?config=<url-encoded config URL>` (wired in
-// main.js) so a whole setup — tolerances, colours, media, framing — can be
-// reached with one shared link instead of a manual load. Same CORS rules as
-// media: the host has to actually send Access-Control-Allow-Origin, so this
-// works from e.g. raw.githubusercontent.com or your own server, but not from
-// a Google Drive share link or similar viewer-page URL.
 export async function loadConfigFromURL(url) {
   statusEl.textContent = 'Loading config from URL…';
   try {
