@@ -75,13 +75,18 @@ function processFrame(now) {
   renderDebugBar(counts);
 
   if (state.stereo) {
-    if (stereoCanvas.width !== MW * 2 || stereoCanvas.height !== MH) {
-      stereoCanvas.width = MW * 2; stereoCanvas.height = MH;
+    const dpr = window.devicePixelRatio || 1;
+    const cw = Math.round(stereoCanvas.clientWidth  * dpr);
+    const ch = Math.round(stereoCanvas.clientHeight * dpr);
+    if (cw && ch && (stereoCanvas.width !== cw || stereoCanvas.height !== ch)) {
+      stereoCanvas.width = cw; stereoCanvas.height = ch;
     }
-    renderStereoGL(mainCanvas, MW, MH, {
+    const eyeW = Math.floor(stereoCanvas.width / 2), eyeH = stereoCanvas.height;
+    renderStereoGL(mainCanvas, MW, MH, eyeW, eyeH, {
       shiftL: state.stereoShiftL, shiftR: state.stereoShiftR,
       angle: state.stereoAngle * Math.PI / 180,
       k1: state.stereoDistort, k2: 0,
+      fill: state.stereoFill,
     });
   }
 

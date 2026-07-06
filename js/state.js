@@ -56,4 +56,5 @@ export const state = {
   stereoShiftL: 0,
   stereoShiftR: 0,
   stereoDistort: 0,   // barrel coefficient: 0 = flat, + = barrel, − = pincushion
+  stereoFill: 1,   // >1 zooms each eye to push barrel corners toward the edges
 };

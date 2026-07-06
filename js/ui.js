@@ -102,6 +102,12 @@ export function wireStereoSlider() {
       set: v => { state.stereoDistort = v; },
       format: v => v.toFixed(2),
     }),
+    buildStereoRange({
+      label: 'Fill', min: 1, max: 2, step: 0.01,
+      get: () => state.stereoFill,
+      set: v => { state.stereoFill = v; },
+      format: v => v.toFixed(2) + '×',
+    }),
   );
 }
 
