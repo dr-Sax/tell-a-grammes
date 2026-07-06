@@ -125,4 +125,5 @@ export function renderStereoGL(source, MW, MH, { shiftL, shiftR, angle, k1, k2 }
   gl.uniform1f(uni.uShift, shiftR);
   gl.uniform1f(uni.uAngle, -angle);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  
 }
