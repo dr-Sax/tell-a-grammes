@@ -46,7 +46,7 @@
       "v": 0.7400054466230929,
       "media": {
         "type": "sequence",
-        "timeline": { "0": 2, "3": 0 }
+        "timeline": { "0": 1, "2": 2, "4": 0 }
       }
     },
     {
@@ -56,8 +56,8 @@
       "s": 0.7025163366916096,
       "v": 0.9244553376906313,
       "media": {
-        "type": "gif",
-        "url": "https://media3.giphy.com/media/9TZf1cjD2iDSEgrb4O/giphy.gif"
+        "type": "sequence",
+        "timeline": { "0": 2, "2": 1, "4": 0 }
       }
     },
     null,
