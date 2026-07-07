@@ -10,6 +10,7 @@ import { pieceMedia } from './media.js';
 import { drawCaption } from './caption.js';
 import { poolAsset } from './pool.js';
 import { timelineValueAt } from './timeline.js';
+import { audioActive, getAudioTime } from './audio.js';
 
 export function drawOverlay(hull, i, MW, MH) {
   if (!hull || hull.length < 3) return;
@@ -32,19 +33,32 @@ export function drawOverlay(hull, i, MW, MH) {
   const media = pieceMedia[i];
   const adj = state.mediaAdjust[i];
 
+  // Clock source for timed media (captions + sequences). A global audio track,
+  // if the config supplied one, is the MASTER: every timed piece reads the same
+  // song position, so they stay locked to the audio and loop with it — and since
+  // audio.loop owns the wrap, timelineValueAt must NOT re-wrap (loop=false), or a
+  // song longer than the cue loop would replay the cues several times per play.
+  // With no track we fall back to this piece's own detection-gated clock
+  // (captionElapsed[i], advanced in main.js only on detected frames) and let the
+  // cue list loop on its own. Either way detection still gates whether we draw at
+  // all — under audio the clock keeps moving while a piece is out of frame, so
+  // re-detecting it mid-song snaps straight to the right word/frame.
+  const useAudio = audioActive();
+  const clock = useAudio ? getAudioTime() : state.captionElapsed[i];
+  const loop  = !useAudio;
+
   // The element to actually draw this frame, or null → colour wash. Image/gif
   // use the piece's own decoded asset; a video only while it's playing; a
-  // sequence resolves its timeline (keyed off the shared captionElapsed[i]
-  // clock, so it pauses when the piece leaves frame just like a caption) to an
-  // index into the global pool, and draws whatever asset sits there — null if
-  // that slot is empty or failed to decode, which falls through to the wash.
+  // sequence resolves its timeline against `clock` to an index into the global
+  // pool, and draws whatever asset sits there — null if that slot is empty or
+  // failed to decode, which falls through to the wash.
   // Captions never set this: they wash, then paint a word on top below.
   let frameEl = null;
   if (media) {
     if (media.type === 'image' || media.type === 'gif') frameEl = media.el;
     else if (media.type === 'video' && !media.el.paused) frameEl = media.el;
     else if (media.type === 'sequence') {
-      const asset = poolAsset(timelineValueAt(media.cues, state.captionElapsed[i]));
+      const asset = poolAsset(timelineValueAt(media.cues, clock, loop));
       if (asset) frameEl = asset.el;
     }
   }
@@ -67,11 +81,11 @@ export function drawOverlay(hull, i, MW, MH) {
     mainCtx.globalAlpha = 1;
   }
 
-  // caption word on top of the wash, still inside the polygon clip. The active
-  // word is keyed off state.captionElapsed[i] (advanced in main.js only on
-  // detected frames), so a piece's captions pause when it leaves frame.
+  // caption word on top of the wash, still inside the polygon clip. Keyed off
+  // the same `clock` resolved above — the global audio position when a track is
+  // loaded, otherwise this piece's detection-gated captionElapsed[i].
   if (media && media.type === 'caption') {
-    drawCaption(mainCtx, media.cues, i, bx, by, bw, bh, adj);
+    drawCaption(mainCtx, media.cues, clock, loop, bx, by, bw, bh, adj);
   }
 
   mainCtx.restore();
