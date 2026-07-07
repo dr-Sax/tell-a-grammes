@@ -6,6 +6,7 @@ import { state } from './state.js';
 import { statusEl } from './dom.js';
 import { isGif, loadGif } from './gif.js';
 import { parseCues } from './caption.js';
+import { parseTimeline } from './timeline.js';
 
 // per piece: { type:'image'|'video'|'gif'|'caption', el, url, name, sourceURL,
 //              link, stop?, cues? } or null
@@ -138,5 +139,24 @@ export function attachCaptionCues(i, cuesRaw, refresh) {
   pieceMedia[i] = { type: 'caption', el: null, url: null, name: 'inline captions', sourceURL: null, link: null, cues };
   state.captionElapsed[i] = 0;
   statusEl.textContent = `${PIECES[i].name}: caption attached`;
+  if (refresh) refresh();
+}
+
+// A `sequence` piece: a timeline of { t → asset index } into the global media
+// pool (pool.js), authored in config as {"<seconds>": <index>}. The record
+// itself is featherweight — no `el`, no `url`, no `stop` — it just carries the
+// cue list and reaches into the pool at draw time (render.js). That's exactly
+// why disposeMedia needs no special case for it: with nothing of its own to
+// free, clearing a sequence piece can't touch a pool asset another piece still
+// uses. The clock is state.captionElapsed[i] (shared with captions, advanced in
+// main.js only on detected frames), reset here so playback starts at cue zero.
+export function attachSequence(i, timelineRaw, refresh) {
+  const cues = parseTimeline(timelineRaw, v => parseInt(v, 10))
+                 .filter(c => Number.isFinite(c.value));
+  if (!cues.length) throw new Error('No valid timeline cues in sequence');
+  disposeMedia(i);
+  pieceMedia[i] = { type: 'sequence', el: null, url: null, name: 'sequence', sourceURL: null, link: null, cues };
+  state.captionElapsed[i] = 0;
+  statusEl.textContent = `${PIECES[i].name}: sequence attached (${cues.length} cues)`;
   if (refresh) refresh();
 }

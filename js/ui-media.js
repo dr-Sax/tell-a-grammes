@@ -73,6 +73,16 @@ export function buildMediaRow(i) {
     } else if (m.type === 'caption') {
       // captions have no frame — show a "CC" badge instead
       thumb.src = captionThumbURL();
+    } else if (m.type === 'sequence') {
+      // sequences draw from the shared pool, not their own el — badge it
+      const tc = document.createElement('canvas');
+      tc.width = 40; tc.height = 28;
+      const g = tc.getContext('2d');
+      g.fillStyle = '#1e2a16'; g.fillRect(0, 0, 40, 28);
+      g.fillStyle = '#8fd16f'; g.font = '700 11px system-ui, sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('SEQ', 20, 15);
+      thumb.src = tc.toDataURL();
     } else {
       // video or gif: el is a video/canvas — snapshot the current frame
       const tc = document.createElement('canvas');

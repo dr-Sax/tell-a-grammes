@@ -6,46 +6,24 @@
 // media.js; this module just reads it.
 
 import { state } from './state.js';
+import { parseTimeline, timelineValueAt } from './timeline.js';
 
 const WIDTH_FRAC  = 0.50;  // word fills this fraction of the bbox width…
 const HEIGHT_FRAC = 0.50;  // …but is never taller than this fraction of it
 const FONT = px => `700 ${px}px system-ui, sans-serif`;
 
-// {"<seconds>": "<word>"} → time-sorted [{ t, text }]. JSON key order isn't
-// guaranteed, so the sort is required, not cosmetic.
-export function parseCues(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
-  return Object.keys(raw)
-    .map(k => ({ t: parseFloat(k), text: String(raw[k]) }))
-    .filter(c => Number.isFinite(c.t))
-    .sort((a, b) => a.t - b.t);
-}
-
-function loopLength(cues) {
-  if (cues.length < 2) return Infinity;
-  return cues[cues.length - 1].t + 0.5;
-}
-
-// Last cue with t <= elapsed (binary search). null before the first cue; the
-// final word holds forever — there are no end times, by design.
-export function captionWord(cues, elapsed) {
-  if (!cues.length) return null;
-  const period = loopLength(cues);
-  if (Number.isFinite(period) && period > 0) elapsed %= period;
-
-  let lo = 0, hi = cues.length - 1, ans = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (cues[mid].t <= elapsed) { ans = mid; lo = mid + 1; } else hi = mid - 1;
-  }
-  return ans < 0 ? null : cues[ans].text;
-}
+// {"<seconds>": "<word>"} → time-sorted [{ t, value }] where value is the word.
+// Just the generic timeline parser with the raw values coerced to strings; the
+// scheduling itself (sort, hold-until-next, loop) now lives in timeline.js and
+// is shared with sequence pieces. Kept exported under this name because media.js
+// still imports parseCues for the caption file-picker path.
+export const parseCues = raw => parseTimeline(raw, v => String(v));
 
 // Draw piece i's active word into its bounding box, centred + scaled to fit a
 // single line. `ctx` is already clipped to the piece polygon and the colour
 // wash already painted by the caller.
 export function drawCaption(ctx, cues, i, bx, by, bw, bh, adj = { zoom: 1, xshift: 0, yshift: 0, rotate: 0 }) {
-  const word = captionWord(cues, state.captionElapsed[i]);
+  const word = timelineValueAt(cues, state.captionElapsed[i]);
   if (!word) return;
 
   ctx.font = FONT(100);                       // measure at a fixed size, scale result

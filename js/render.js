@@ -8,6 +8,8 @@ import { state } from './state.js';
 import { mainCtx, debugBar } from './dom.js';
 import { pieceMedia } from './media.js';
 import { drawCaption } from './caption.js';
+import { poolAsset } from './pool.js';
+import { timelineValueAt } from './timeline.js';
 
 export function drawOverlay(hull, i, MW, MH) {
   if (!hull || hull.length < 3) return;
@@ -28,18 +30,28 @@ export function drawOverlay(hull, i, MW, MH) {
   mainCtx.clip();
 
   const media = pieceMedia[i];
-  // images + gifs always render; videos only while actually playing. Captions
-  // are NOT drawable frames — they fall through to the colour wash, then paint
-  // their word on top (handled after this block).
-  const drawableFrame = media &&
-    (media.type === 'image' || media.type === 'gif' ||
-     (media.type === 'video' && !media.el.paused));
-  
   const adj = state.mediaAdjust[i];
 
-  if (drawableFrame) {
-    const mw = media.el.videoWidth  || media.el.naturalWidth  || media.el.width  || 1;
-    const mh = media.el.videoHeight || media.el.naturalHeight || media.el.height || 1;
+  // The element to actually draw this frame, or null → colour wash. Image/gif
+  // use the piece's own decoded asset; a video only while it's playing; a
+  // sequence resolves its timeline (keyed off the shared captionElapsed[i]
+  // clock, so it pauses when the piece leaves frame just like a caption) to an
+  // index into the global pool, and draws whatever asset sits there — null if
+  // that slot is empty or failed to decode, which falls through to the wash.
+  // Captions never set this: they wash, then paint a word on top below.
+  let frameEl = null;
+  if (media) {
+    if (media.type === 'image' || media.type === 'gif') frameEl = media.el;
+    else if (media.type === 'video' && !media.el.paused) frameEl = media.el;
+    else if (media.type === 'sequence') {
+      const asset = poolAsset(timelineValueAt(media.cues, state.captionElapsed[i]));
+      if (asset) frameEl = asset.el;
+    }
+  }
+
+  if (frameEl) {
+    const mw = frameEl.videoWidth  || frameEl.naturalWidth  || frameEl.width  || 1;
+    const mh = frameEl.videoHeight || frameEl.naturalHeight || frameEl.height || 1;
     const scale = Math.max(bw / mw, bh / mh) * adj.zoom;
     const dw = mw * scale, dh = mh * scale;
     const cx = bx + bw / 2 + adj.xshift * bw;
@@ -47,7 +59,7 @@ export function drawOverlay(hull, i, MW, MH) {
     mainCtx.globalAlpha = 0.92;
     mainCtx.translate(cx, cy);
     mainCtx.rotate(adj.rotate * Math.PI / 180);
-    mainCtx.drawImage(media.el, -dw / 2, -dh / 2, dw, dh);
+    mainCtx.drawImage(frameEl, -dw / 2, -dh / 2, dw, dh);
   } else {
     mainCtx.globalAlpha = 0.45;
     mainCtx.fillStyle = color;
