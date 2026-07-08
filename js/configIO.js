@@ -8,7 +8,6 @@ import { state } from './state.js';
 import { statusEl, $ } from './dom.js';
 import { pieceMedia, loadMediaFromURL, attachCaptionCues, attachSequence } from './media.js';
 import { loadPool, serializePool, disposePool, poolSize } from './pool.js';
-import { loadAudio, disposeAudio, audioURL } from './audio.js';
 import { buildUI, syncSliders } from './ui.js';
 
 // The schema is a strict superset of the original calibration-only file:
@@ -49,10 +48,6 @@ function getCalData() {
   // Only carry the pool when something's actually in it, so calibration-only /
   // caption-only saves stay as clean as they were before sequences existed.
   if (poolSize()) data.assets = serializePool();
-
-  // Global master-clock track (top-level, like the pool — not per-piece). Only
-  // written when one is set; absent means "no audio" on load.
-  if (audioURL()) data.audio = audioURL();
 
   data.pieces = PIECES.map((_, i) => {
     const c = state.calibrated[i];
@@ -116,12 +111,6 @@ async function applyCalData(data) {
   } else {
     disposePool();
   }
-
-  // Global audio track — independent of the pool; an absent field means "none."
-  // Starts playing on the next user gesture (camera start / canvas tap); see
-  // audio.js. A bad URL is tolerated the same way a bad pool asset is.
-  if (data.audio) loadAudio(data.audio);
-  else disposeAudio();
 
   if (Array.isArray(data.pieces)) {
     for (let i = 0; i < data.pieces.length; i++) {

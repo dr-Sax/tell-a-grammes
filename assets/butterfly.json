@@ -3,7 +3,6 @@
   "stol": 28,
   "vtol": 80,
   "minArea": 20,
-  "audio": "https://thorough-salmon-5asvkwv7.edgeone.dev/The%20butterfly%20in%20honored%20dust.mp3",
   "assets": [
     { "type": "gif", "url": "https://media3.giphy.com/media/0K1NGNF6WaC02Z3ySG/200.gif" },
     { "type": "gif", "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExbWtueDVjdnVqbm9hOHU0dHJmemJjNnVrazQ4emluZGo3aWRsZDZpZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7buh0sx5p7qrnJ5u/giphy.gif" },

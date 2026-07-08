@@ -10,7 +10,6 @@ import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel, clientToCanvasP
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
 import { pieceMedia } from './media.js';
 import { buildUI } from './ui.js';
-import { startAudio } from './audio.js';
 
 function calibrateAt(clientX, clientY) {
   if (state.calibrating < 0 || !state.running) return;
@@ -121,12 +120,9 @@ export function wireCalibration() {
     const t = e.changedTouches[0];
     if (t) calibrateAt(t.clientX, t.clientY);
   }, { passive: false });
-  // keep the camera live + resume any autoplay-blocked piece videos on tap, and
-  // retry the global audio track — if its camera-start play() was blocked, this
-  // tap is a fresh gesture that can start it (startAudio is idempotent).
+  // keep the camera live + resume any autoplay-blocked piece videos on tap
   mainCanvas.addEventListener('pointerdown', () => {
     keepCameraLive();
-    startAudio();
     if (state.calibrating >= 0) return;
     for (const m of pieceMedia) if (m && m.type === 'video' && m.el.paused) m.el.play().catch(() => {});
   });

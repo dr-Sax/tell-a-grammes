@@ -28,18 +28,14 @@ export function loopLength(cues) {
   return cues[cues.length - 1].t + 0.5;
 }
 
-// Value of the last cue with t <= elapsed (binary search). When `loop` is true
-// (the no-audio default) it wraps via loopLength; when false the caller owns the
-// wrap authority — a global audio.loop track (see render.js) — and we read
-// straight through with no modulo. Returns null before the first cue. Note: a
-// cue's value may legitimately be 0 (a valid pool index), so callers must
-// null-check the return, never treat it as falsy.
-export function timelineValueAt(cues, elapsed, loop = true) {
+// Value of the last cue with t <= elapsed (binary search), looping via
+// loopLength. Returns null before the first cue. Note: a cue's value may
+// legitimately be 0 (a valid pool index), so callers must null-check the
+// return, never treat it as falsy.
+export function timelineValueAt(cues, elapsed) {
   if (!cues.length) return null;
-  if (loop) {
-    const period = loopLength(cues);
-    if (Number.isFinite(period) && period > 0) elapsed %= period;
-  }
+  const period = loopLength(cues);
+  if (Number.isFinite(period) && period > 0) elapsed %= period;
 
   let lo = 0, hi = cues.length - 1, ans = -1;
   while (lo <= hi) {

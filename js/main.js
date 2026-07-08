@@ -17,7 +17,6 @@ import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 import { renderStereoGL } from './stereoGL.js';
-import { startAudio } from './audio.js';
 
 // Registration (relative-colour) tracking vs. the original per-piece absolute
 // thresholding. Off by default; enable with ?match=1 in the URL (works on iOS
@@ -153,11 +152,6 @@ function processFrame(now) {
 }
 
 startBtn.onclick = async () => {
-  // Fire synchronously, before any await — while the click gesture is still live
-  // — so an unmuted global track has its best shot at starting without a second
-  // tap (matters on iOS, where the gesture token expires across `await`). No-op
-  // if no track is loaded yet; the config-load path and canvas taps also retry.
-  startAudio();
   try {
     statusEl.textContent = 'Requesting camera…';
     const { PW, PH } = await startCamera();
