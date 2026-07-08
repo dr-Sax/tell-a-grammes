@@ -9,9 +9,9 @@ import {
   panelToggle, overlayPanel, stereoCanvas,
 } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
-import { computeHSV, detectPiece, detectAllPieces } from './tracker.js';
-import { resetTheta } from './match.js';
-import { drawOverlay, renderDebugBar } from './render.js';
+import { computeHSV, detectPiece, detectAllPieces, detectFillMask } from './tracker.js';
+import { resetTheta, getTheta } from './match.js';
+import { drawOverlay, renderDebugBar, drawFillOverlay } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider } from './ui.js';
 import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
@@ -33,6 +33,19 @@ window.addEventListener('keydown', e => {
   }
 });
 
+// Colour-fill render mode. Off by default; enable with ?fill=1 or toggle with
+// the F key. When on, each calibrated colour is rendered as media poured into
+// EVERY pixel of that colour (spirals, interlocking regions, holes) instead of
+// one tracked polygon. Detection for the blob/registration paths is untouched —
+// this only swaps what gets drawn — so it can't break existing tracking.
+let fillMode = new URLSearchParams(location.search).get('fill') === '1';
+window.addEventListener('keydown', e => {
+  if (e.key === 'f' || e.key === 'F') {
+    fillMode = !fillMode;
+    statusEl.textContent = 'Render: ' + (fillMode ? 'colour-fill (all regions)' : 'blob polygons');
+  }
+});
+
 function processFrame(now) {
   if (!state.running) return;
   const t = (typeof now === 'number') ? now : performance.now();
@@ -50,6 +63,27 @@ function processFrame(now) {
   else { mainCtx.fillStyle = '#fff'; mainCtx.fillRect(0, 0, MW, MH); }
 
   const counts = Array(N).fill(0);
+
+  if (fillMode) {
+    // Colour-fill: media poured into every pixel of each calibrated colour. If
+    // match mode is also on, run the registration pass once purely to keep θ
+    // current, then thread it through detectFillMask so filled colours ride the
+    // same lighting compensation as tracked pieces.
+    let theta = 0;
+    if (matchMode) {
+      detectAllPieces(state.calibrated, PW, PH, state.lastCentroid);
+      theta = getTheta() || 0;
+    }
+    for (let i = 0; i < N; i++) {
+      const cal = state.calibrated[i];
+      if (!cal) continue;
+      const res = detectFillMask(cal, PW, PH, theta);
+      if (!res) continue;
+      state.captionElapsed[i] += dt;
+      counts[i] = res.filled;
+      drawFillOverlay(i, res, PW, PH, MW, MH);
+    }
+  } else {
 
   // In match mode, one segmentation resolves every piece at once; otherwise
   // each piece runs its own absolute-colour detector. Both yield the same
@@ -94,6 +128,8 @@ function processFrame(now) {
 
     state.smoothHulls[i] = matchAndLerp(state.smoothHulls[i], poly, lerpThis);
     drawOverlay(state.smoothHulls[i], i, MW, MH);
+  }
+
   }
   renderDebugBar(counts);
 

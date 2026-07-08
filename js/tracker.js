@@ -7,12 +7,14 @@ import { registerBlobs } from './match.js';
 let Hc, Sc, Vc;            // per-pixel HSV (Float32: H 0-360, S/V 0-1)
 let maskA, maskB, maskC;   // binary scratch masks (Uint8)
 let labels, labelStack;    // connected-component labels + flood-fill stack
+let fillRGBA;              // proc-res RGBA stencil for colour-fill mode (white+alpha)
 
 export function allocBuffers(w, h) {
   const n = w * h;
   Hc = new Float32Array(n); Sc = new Float32Array(n); Vc = new Float32Array(n);
   maskA = new Uint8Array(n); maskB = new Uint8Array(n); maskC = new Uint8Array(n);
   labels = new Int32Array(n); labelStack = new Int32Array(n);
+  fillRGBA = new Uint8ClampedArray(n * 4);
 }
 
 // RGB→HSV for the whole frame, once.
@@ -31,8 +33,12 @@ export function computeHSV(img, count) {
   }
 }
 
-function buildMask(cal, count) {
+function buildMask(cal, count, hueOffset = 0) {
   const hT = params.htol * 2, sT = params.stol / 255, vT = params.vtol / 255;
+  const calH = cal.h + hueOffset;   // hueOffset lets colour-fill mode apply the
+                                    // registration path's global θ so a filled
+                                    // colour survives lighting shifts too; the
+                                    // per-piece detectPiece path passes 0.
   // V tolerance is a FLOOR only, not a band. Under blacklight the paint
   // should be the brightest saturated thing in frame, and its absolute
   // brightness legitimately drifts more than ambient-light tracking would
@@ -42,7 +48,7 @@ function buildMask(cal, count) {
   // filtered anything useful.
   const vFloor = cal.v - vT;
   for (let p = 0; p < count; p++) {
-    let dh = Math.abs(Hc[p] - cal.h) % 360; if (dh > 180) dh = 360 - dh;
+    let dh = Math.abs(Hc[p] - calH) % 360; if (dh > 180) dh = 360 - dh;
     maskA[p] = (dh <= hT && Math.abs(Sc[p] - cal.s) <= sT && Vc[p] >= vFloor) ? 1 : 0;
   }
 }
@@ -297,4 +303,52 @@ export function detectAllPieces(calibrated, w, h, prevCentroids) {
     };
   }
   return out;
+}
+
+// ── colour-fill path: every region of a colour → one stencil ──────────────────
+// A different *rendering* target than the blob path. Instead of reducing a
+// colour to one traced polygon (which can't express a spiral, holes, or
+// disconnected regions), this keeps the whole colour mask and hands it back as
+// a proc-res RGBA stencil (opaque white where the colour is, transparent
+// elsewhere) for render.js to composite media through (destination-in). So
+// "all the red", however tangled, gets the media mapped onto it.
+//
+// Speck rejection: we still connected-component the mask and keep only blobs
+// ≥ minArea, so sensor-noise dots don't flash media — but we keep EVERY
+// surviving component, not just the biggest, which is the whole point.
+// hueOffset threads the registration θ through (0 when match mode is off) so a
+// filled colour is as lighting-robust as a tracked one.
+//
+// Returns { rgba, w, h, bx, by, bw, bh, filled } (bbox in proc px) or null if
+// nothing survives. rgba is a shared buffer — consume it before the next call.
+export function detectFillMask(cal, w, h, hueOffset = 0) {
+  const count = w * h;
+  buildMask(cal, count, hueOffset);
+  morphClose(w, h, CLOSE_R);
+
+  const blobs = findBlobs(w, h, params.minArea);   // labels[] now filled
+  if (!blobs.length) return null;
+
+  let maxLabel = 0;
+  for (const b of blobs) if (b.label > maxLabel) maxLabel = b.label;
+  const keep = new Uint8Array(maxLabel + 1);
+  for (const b of blobs) keep[b.label] = 1;
+
+  let minX = w, minY = h, maxX = -1, maxY = -1, filled = 0;
+  for (let p = 0, q = 0; p < count; p++, q += 4) {
+    const lbl = labels[p];
+    if (lbl > 0 && lbl <= maxLabel && keep[lbl]) {
+      fillRGBA[q] = 255; fillRGBA[q + 1] = 255; fillRGBA[q + 2] = 255; fillRGBA[q + 3] = 255;
+      const x = p % w, y = (p / w) | 0;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      filled++;
+    } else {
+      fillRGBA[q + 3] = 0;
+    }
+  }
+  if (filled === 0) return null;
+
+  return { rgba: fillRGBA, w, h,
+           bx: minX, by: minY, bw: maxX - minX + 1, bh: maxY - minY + 1, filled };
 }
