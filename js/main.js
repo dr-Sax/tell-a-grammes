@@ -9,7 +9,8 @@ import {
   panelToggle, overlayPanel, stereoCanvas,
 } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
-import { computeHSV, detectPiece } from './tracker.js';
+import { computeHSV, detectPiece, detectAllPieces } from './tracker.js';
+import { resetTheta } from './match.js';
 import { drawOverlay, renderDebugBar } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider } from './ui.js';
 import { wireCalibration } from './calibrate.js';
@@ -17,6 +18,20 @@ import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 import { renderStereoGL } from './stereoGL.js';
 import { startAudio } from './audio.js';
+
+// Registration (relative-colour) tracking vs. the original per-piece absolute
+// thresholding. Off by default; enable with ?match=1 in the URL (works on iOS
+// where there's no keyboard) or toggle live with the M key while running. On
+// toggle we drop the session hue-rotation so the new mode re-acquires cleanly.
+let matchMode = new URLSearchParams(location.search).get('match') === '1';
+window.addEventListener('keydown', e => {
+  if (e.key === 'm' || e.key === 'M') {
+    matchMode = !matchMode;
+    resetTheta();
+    statusEl.textContent =
+      'Tracking: ' + (matchMode ? 'relative registration (match)' : 'per-piece thresholds');
+  }
+});
 
 function processFrame(now) {
   if (!state.running) return;
@@ -36,11 +51,18 @@ function processFrame(now) {
 
   const counts = Array(N).fill(0);
 
+  // In match mode, one segmentation resolves every piece at once; otherwise
+  // each piece runs its own absolute-colour detector. Both yield the same
+  // per-piece { poly, filled, centroid } | null, so the loop below is identical.
+  const batch = matchMode
+    ? detectAllPieces(state.calibrated, PW, PH, state.lastCentroid)
+    : null;
+
   for (let i = 0; i < N; i++) {
     const cal = state.calibrated[i];
     if (!cal) continue;
 
-    const found = detectPiece(cal, PW, PH, state.lastCentroid[i]);
+    const found = batch ? batch[i] : detectPiece(cal, PW, PH, state.lastCentroid[i]);
 
     if (!found) {
       state.missStreak[i]++;

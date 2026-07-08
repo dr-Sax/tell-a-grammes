@@ -2,6 +2,7 @@
 // Per-piece detection: calibrated colour → boundary trace → fixed-N polygon.
 
 import { params, CLOSE_R, BOUNDARY_N, MAX_JUMP_FRAC } from './config.js';
+import { registerBlobs } from './match.js';
 
 let Hc, Sc, Vc;            // per-pixel HSV (Float32: H 0-360, S/V 0-1)
 let maskA, maskB, maskC;   // binary scratch masks (Uint8)
@@ -43,6 +44,21 @@ function buildMask(cal, count) {
   for (let p = 0; p < count; p++) {
     let dh = Math.abs(Hc[p] - cal.h) % 360; if (dh > 180) dh = 360 - dh;
     maskA[p] = (dh <= hT && Math.abs(Sc[p] - cal.s) <= sT && Vc[p] >= vFloor) ? 1 : 0;
+  }
+}
+
+// Colour-agnostic "is this a coloured piece" mask for the registration path:
+// any sufficiently saturated, non-black pixel. This is what lets us segment
+// once (pieces vs white ground) and decide *which* piece each blob is later,
+// by relative colour — instead of running one absolute-hue mask per piece.
+// minSat is derived per-config from the palette (see detectAllPieces) so it
+// always sits below the least-saturated calibrated piece; the vFloor just
+// drops near-black. Saturation is far more white-balance-stable than hue, so
+// this segmentation barely cares about the lighting we're trying to survive.
+function buildSatMask(count, minSat) {
+  const vFloor = 0.12;
+  for (let p = 0; p < count; p++) {
+    maskA[p] = (Sc[p] >= minSat && Vc[p] >= vFloor) ? 1 : 0;
   }
 }
 
@@ -97,11 +113,17 @@ function findBlobs(w, h, minA) {
     let sp = 0;
     labelStack[sp++] = s; labels[s] = cur;
     let area = 0, sx = 0, sy = 0;
+    // Circular-mean hue (via sin/cos sums — hue wraps at 360) and mean sat,
+    // accumulated here so the registration path gets each blob's colour for
+    // free in the same pass. The per-piece path ignores these fields.
+    let hSin = 0, hCos = 0, sSum = 0;
     while (sp > 0) {
       const idx = labelStack[--sp];
       area++;
       const x = idx % w, y = (idx / w) | 0;
       sx += x; sy += y;
+      const rad = Hc[idx] * Math.PI / 180;
+      hSin += Math.sin(rad); hCos += Math.cos(rad); sSum += Sc[idx];
       for (let dy = -1; dy <= 1; dy++) {
         const ny = y + dy; if (ny < 0 || ny >= h) continue;
         const nrow = ny * w;
@@ -113,7 +135,11 @@ function findBlobs(w, h, minA) {
         }
       }
     }
-    if (area >= minA) blobs.push({ label: cur, area, cx: sx / area, cy: sy / area, start: s });
+    if (area >= minA) {
+      let mh = Math.atan2(hSin, hCos) * 180 / Math.PI; if (mh < 0) mh += 360;
+      blobs.push({ label: cur, area, cx: sx / area, cy: sy / area, start: s,
+                   meanHue: mh, meanSat: sSum / area });
+    }
   }
   return blobs;
 }
@@ -215,4 +241,60 @@ export function detectPiece(cal, w, h, prevCentroid) {
 
   const poly = resampleByArcLength(trace, BOUNDARY_N);
   return { poly, filled: blob.area, centroid: [blob.cx, blob.cy] };
+}
+
+// ── registration path: all pieces from one segmentation ───────────────────────
+// Alternative to the per-piece detectPiece loop. Segments every coloured blob
+// once (sat-only), reads each blob's mean colour, then asks match.js which
+// blob is which piece by fitting the stored palette onto what's actually in
+// frame via a single global hue rotation. Returns an array indexed like
+// state.calibrated: each entry is { poly, filled, centroid } (same shape
+// detectPiece returns) for a matched piece, or null for a null/unmatched one —
+// so main.js's existing smoothing / miss-grace / overlay loop is unchanged.
+// computeHSV must have been called for this frame first. prevCentroids is the
+// per-piece last-known position array (state.lastCentroid), used as a soft
+// tiebreak inside match.js.
+export function detectAllPieces(calibrated, w, h, prevCentroids) {
+  const out = Array(calibrated.length).fill(null);
+
+  // Build the active palette from non-null calibrated pieces, and find the
+  // least-saturated one so the segmentation threshold sits safely below it.
+  const palette = [];
+  let minSat = 1;
+  for (let i = 0; i < calibrated.length; i++) {
+    const c = calibrated[i];
+    if (!c) continue;
+    palette.push({ pi: i, h: c.h, s: c.s, prevCentroid: prevCentroids[i] || null });
+    if (c.s < minSat) minSat = c.s;
+  }
+  if (!palette.length) return out;
+
+  // Segment: half the least-saturated palette entry, clamped to a sane band, so
+  // the mask captures every piece but not the near-grey white ground.
+  const segSat = Math.max(0.12, Math.min(0.30, minSat * 0.5));
+  buildSatMask(w * h, segSat);
+  morphClose(w, h, CLOSE_R);
+
+  const blobs = findBlobs(w, h, params.minArea);
+  if (!blobs.length) return out;
+
+  const observed = blobs.map((b, oi) => ({
+    oi, hue: b.meanHue, sat: b.meanSat,
+    cx: b.cx, cy: b.cy, area: b.area, label: b.label, start: b.start,
+  }));
+
+  const matches = registerBlobs(palette, observed, w);
+
+  for (const p of palette) {
+    const blob = matches.get(p.pi);
+    if (!blob) continue;
+    const trace = traceBoundary(blob.label, blob.start, w, h);
+    if (trace.length < 3) continue;
+    out[p.pi] = {
+      poly: resampleByArcLength(trace, BOUNDARY_N),
+      filled: blob.area,
+      centroid: [blob.cx, blob.cy],
+    };
+  }
+  return out;
 }
