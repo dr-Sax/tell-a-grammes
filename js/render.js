@@ -3,7 +3,7 @@
 // and the debug strip. Reads detection results; never mutates them.
 
 import { PIECES, N } from './config.js';
-import { hsvToHex } from './hsv.js';
+import { hsvToHex, rgbToHex } from './hsv.js';
 import { state } from './state.js';
 import { mainCtx, debugBar } from './dom.js';
 import { pieceMedia } from './media.js';
@@ -11,10 +11,19 @@ import { drawCaption } from './caption.js';
 import { poolAsset } from './pool.js';
 import { timelineValueAt } from './timeline.js';
 
+// A calibrated colour's swatch/wash colour. Post-refactor a cal record carries
+// the sampled RGB triple (which is the literal thing detection matches
+// against); configs saved before that only carry h/s/v, so fall back.
+function swatchColor(cal) {
+  if (!cal) return '#888';
+  if (Number.isFinite(cal.r)) return rgbToHex(cal.r, cal.g, cal.b);
+  return hsvToHex(cal.h, cal.s, cal.v);
+}
+
 export function drawOverlay(hull, i, MW, MH) {
   if (!hull || hull.length < 3) return;
   const cal = state.calibrated[i];
-  const color = hsvToHex(cal.h, cal.s, cal.v);
+  const color = swatchColor(cal);
 
   // polygon bounding box — used by both the image fit and the caption layout
   const xs = hull.map(p => p[0]), ys = hull.map(p => p[1]);
@@ -119,20 +128,31 @@ function ensureFillCanvases(PW, PH, MW, MH) {
 // renderer needs no edits.
 function paintMedia(ctx, i, bx, by, bw, bh, MW, MH) {
   const cal = state.calibrated[i];
-  const color = hsvToHex(cal.h, cal.s, cal.v);
+  const color = swatchColor(cal);
   const media = pieceMedia[i];
   const adj = state.mediaAdjust[i];
 
-  const useAudio = audioActive();
-  const clock = useAudio ? getAudioTime() : state.captionElapsed[i];
-  const loop = !useAudio;
+  // Clock: state.captionElapsed[i] — "seconds while this colour was visible",
+  // advanced in main.js only on frames where the colour was actually found.
+  //
+  // This function previously reached for a global audio master clock via
+  // audioActive() / getAudioTime(), but neither was ever imported into this
+  // file — so the first fill draw threw a ReferenceError, which skipped the
+  // requestAnimationFrame at the bottom of the frame loop and froze the feed on
+  // frame one. It presented as a mobile bug only because the desktop path
+  // happened to be exercising the polygon renderer instead.
+  //
+  // Realigned with drawOverlay, which is the path that actually works: same
+  // clock, same drawCaption signature. Re-threading the audio master clock is a
+  // separate change and needs audio.js in hand.
+  const clock = state.captionElapsed[i];
 
   let frameEl = null;
   if (media) {
     if (media.type === 'image' || media.type === 'gif') frameEl = media.el;
     else if (media.type === 'video' && !media.el.paused) frameEl = media.el;
     else if (media.type === 'sequence') {
-      const asset = poolAsset(timelineValueAt(media.cues, clock, loop));
+      const asset = poolAsset(timelineValueAt(media.cues, clock));
       if (asset) frameEl = asset.el;
     }
   }
@@ -158,8 +178,10 @@ function paintMedia(ctx, i, bx, by, bw, bh, MW, MH) {
     ctx.restore();
   }
 
+  // Same signature drawOverlay uses — drawCaption resolves the active cue from
+  // state.captionElapsed[i] itself, so it takes the piece index, not a time.
   if (media && media.type === 'caption') {
-    drawCaption(ctx, media.cues, clock, loop, bx, by, bw, bh, adj);
+    drawCaption(ctx, media.cues, i, bx, by, bw, bh, adj);
   }
 }
 
@@ -195,7 +217,7 @@ export function renderDebugBar(counts) {
     const cal = state.calibrated[i];
     if (!cal) continue;
     const c = counts[i];
-    const col = hsvToHex(cal.h, cal.s, cal.v);
+    const col = swatchColor(cal);
     html += c > 0
       ? `<span class="dbadge" style="background:${col}22;color:${col};border:1px solid ${col}88">${PIECES[i].name} ${c}px</span>`
       : `<span class="dbadge" style="color:#444;border:1px solid #222">${PIECES[i].name} —</span>`;
