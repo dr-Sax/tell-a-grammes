@@ -1,100 +1,104 @@
-// ── quantize: seeded k-means in CIELAB ────────────────────────────────────────
-// Two changes from the RGB version, and together they remove every colour
-// slider from the app.
+// ── quantize: unsupervised ink discovery in CIELAB ────────────────────────────
+// The relationship between a tap and a colour is now inverted.
 //
-// 1. CIELAB. Perceptually uniform, so plain ΔE needs no lightness/chroma
-//    weight. `lumaW` is gone — it was a fudge factor for RGB's non-uniformity,
-//    and it could never be right for red-vs-black and blue-vs-blue at the same
-//    time. See lab.js.
+// Before: a tap DEFINED a colour, and classification was argmin over the tapped
+// colours. That has an unavoidable consequence — nearest-neighbour assignment
+// partitions ALL of colour space among the entries you gave it. There is no
+// "none of the above". Tap two blues and every pixel in the room (paper, skin,
+// the table) is handed to whichever blue it happens to sit nearest, because it
+// has nowhere else to go. White paper is only ΔE 17 from a light blue; it never
+// stood a chance. So you had to hand-calibrate the background — supplying
+// information the system couldn't infer.
 //
-// 2. THE TAPS ARE SEEDS, NOT REFERENCES. This is the real shift. A flat-ink
-//    print, seen by a camera, doesn't produce pixels scattered around some ideal
-//    colour — it produces K TIGHT CLUSTERS, one per ink, plus a thin smear of
-//    edge pixels between them. That structure is already in the frame. We don't
-//    have to guess where an ink sits; we can just find it.
+// Except it CAN infer it. The paper is right there in the frame. A flat-ink
+// print, seen by a camera, produces a pixel distribution that IS a handful of
+// tight clusters — one per ink, one for the paper, one for shadow. That
+// structure doesn't need to be described; it needs to be FOUND.
 //
-//    So a tap no longer says "red is exactly RGB(200,30,40)". It says "the
-//    cluster I'm pointing at is the one I want the GIF in" — a LABEL. Each
-//    frame we run a k-means step against the live pixels: assign every pixel to
-//    its nearest centre, then move each centre to the mean of what it caught.
+// Now: k-means runs unsupervised over the whole frame and discovers K clusters.
+// Every colour present gets one, whether or not you care about it. Then a tap
+// simply CLAIMS the cluster nearest to it — "that one, the GIF goes in that
+// one". Clusters nobody claims are background: they compete for their own
+// pixels, they keep the paper off your ink, and nothing is drawn for them.
 //
-// What that buys, all for free:
+// Consequences worth noticing:
+//   • No background calibration. Paper, skin, shadow, and table are discovered.
+//   • No reject radius. Unclaimed clusters absorb everything that isn't ink,
+//     which is what a reject threshold was badly approximating.
+//   • Re-tapping is instant. Ownership is recomputed every frame from the
+//     current taps; the clusters themselves never need re-seeding.
+//   • A bad tap can't poison a cluster, because a tap no longer moves anything.
 //
-//   • No white-point gain. The old von Kries estimate existed to drag a FIXED
-//     palette back under changing light. The palette isn't fixed any more — the
-//     centres ARE the observed inks, so when the lighting shifts, the clusters
-//     drift and the centres follow. The gain machinery, its EMA, its median
-//     voting, and the G reset key are all deleted.
-//
-//   • No `soft` slider. Confidence ramps over a fraction of the distance to the
-//     nearest OTHER centre. Well-separated palettes get crisp edges; tight
-//     palettes get gentle ones. Correct by construction, at any palette.
-//
-//   • No `reject` slider. "Too far from every centre" is likewise measured
-//     against the palette's own scale, not an absolute number in units nobody
-//     can reason about.
-//
-// What survives: minArea, which isn't a colour dial at all — it's a real design
-// choice about the smallest region you care about.
+// k-means runs over a HISTOGRAM of the 5-bit Lab cube, not over raw pixels:
+// ~few thousand populated cells instead of 77k pixels, each weighted by its
+// population. Same answer, an order of magnitude less work, and the histogram
+// doubles as the structure we seed and re-seed from.
 
 import { labCube, cubeIndex, CUBE, dE2, rgb2lab } from './lab.js';
 import { hsv2rgb } from './hsv.js';
 
-// Sentinel class for "this pixel belongs to no ink".
 export const NO_CLASS = 255;
 
 // ── constants (deliberately not sliders) ──────────────────────────────────────
 
-// How fast a centre chases the cluster mean. Lighting drifts slowly; sensor
-// noise doesn't. Low enough to be steady, high enough to track a lamp change.
-const CENTRE_EMA = 0.15;
+// How many clusters to discover. Needs to comfortably exceed the number of inks
+// so there's always somewhere for paper, shadow, glare and skin to go. Too few
+// and an unmodelled colour gets forced into an ink's cluster — the exact failure
+// we're fixing. Too many just costs a little time; spare clusters harmlessly
+// split the background. 10 is generous for any small-palette design.
+const K = 10;
 
-// A centre may not wander further than this (ΔE) from the colour that was
-// actually tapped. Without an anchor, k-means is free to slide a centre off its
-// ink and onto a neighbouring one — the classic bad-init failure — and the
-// user's label would silently come to mean a different colour. This is the
-// leash: enough slack for any plausible illuminant shift, not enough to defect.
-const MAX_DRIFT = 45;
+// How fast a centre chases its cluster's weighted mean. Ink doesn't move;
+// lighting drifts slowly; sensor noise is fast. Low and steady.
+const CENTRE_EMA = 0.2;
 
-// Two centres closer than this are, for our purposes, the same ink. Freeze them
-// rather than let them collapse onto each other and fight over pixels.
-const MIN_SEP = 5;
-
-// Confidence ramps over this fraction of the distance to the nearest other
-// centre. A pixel wins its class outright when it beats the runner-up by that
-// much; below it, alpha fades. Scale-free: it means the same thing whether the
-// palette is three garish inks or two nearly identical blues.
+// Confidence ramps over this fraction of the distance to the nearest cluster
+// belonging to a DIFFERENT owner. Scale-free — it means the same thing whether
+// the palette is three garish inks or two nearly identical blues.
 const SOFT_FRAC = 0.35;
 
-// A pixel further than this multiple of the nearest-neighbour separation from
-// EVERY centre isn't any of the inks (a hand, deep shadow, something off-sheet).
-const REJECT_MULT = 1.6;
-
-// Temporal smoothing on the per-class membership fields. Boundary pixels flip
-// class under sensor noise; without this, the media edge crawls. Smoothing the
-// ALPHA — not a polygon, there isn't one — kills the shimmer at its source.
+// Temporal smoothing on the per-owner membership fields. Boundary pixels flip
+// class under sensor noise; smoothing the alpha kills the crawl at its source.
 const ALPHA_EMA = 0.45;
 
-// A cluster needs at least this many pixels before we trust its mean enough to
-// move its centre. Stops a centre from chasing a handful of noise pixels when
-// its ink is occluded.
-const MIN_MEMBERS = 40;
+// A cluster holding less than this share of the frame is dead, and gets
+// re-seeded onto whatever the frame is currently modelling worst.
+const DEAD_FRAC = 0.0005;
+
+// Clusters closer than this (ΔE) are the same ink, and get merged into one
+// GROUP before ownership is decided.
+//
+// This matters more than it looks. K is deliberately larger than the number of
+// real inks (so there's always somewhere for paper and shadow to go), which
+// means k-means will happily spend its spare centres SPLITTING a real ink into
+// two or three sub-clusters — same colour, a few ΔE apart, separated only by
+// sensor noise. If a tap then claimed a single cluster, it would claim one
+// shard of its own ink and abandon the rest: the region would come out riddled
+// with holes. (First run of this code: the light ink recovered 2482 of its 5500
+// pixels. That's why.)
+//
+// So: merge, then claim. 8 ΔE comfortably swallows noise-induced splits while
+// staying well clear of any real palette separation — the two Ey Es blues are
+// 27 apart, white-to-light-blue is 17.
+const MERGE_DE = 8;
 
 // ── state ─────────────────────────────────────────────────────────────────────
 
-let classLUT = new Uint8Array(CUBE);   // cube cell → winning class
-let confLUT  = new Uint8Array(CUBE);   // cube cell → 0-255 soft membership
+const hist = new Uint32Array(CUBE);        // cube cell → pixel count this frame
+const cellOwner = new Uint8Array(CUBE);    // cube cell → owning palette idx / NO_CLASS
+const cellConf = new Uint8Array(CUBE);     // cube cell → 0-255 soft membership
 
-let pxClass = null;    // Uint8Array(n)
-let pxConf  = null;    // Uint8Array(n)
-let alpha   = [];      // Float32Array(n) per class — the EMA'd stencil field
+let cL = new Float32Array(K), cA = new Float32Array(K), cB = new Float32Array(K);
+let ready = false;
 
-// Live cluster centres in Lab, and the seeds they're leashed to.
-let centres = [];      // [{ L, a, b }]
-let seeds   = [];      // [{ L, a, b }] — from the taps; never move
-let seedKey = '';      // signature of the calibration the centres were seeded from
+// clusterOwner[k] = palette index that claimed cluster k, or -1 (background)
+let clusterOwner = new Int8Array(K).fill(-1);
 
-export function resetClusters() { seedKey = ''; centres = []; seeds = []; }
+let pxClass = null;   // Uint8Array(n)
+let pxConf  = null;   // Uint8Array(n)
+let alpha   = [];     // Float32Array(n) per palette entry
+
+export function resetClusters() { ready = false; }
 
 export function allocQuantBuffers(w, h, nClasses) {
   const n = w * h;
@@ -104,12 +108,10 @@ export function allocQuantBuffers(w, h, nClasses) {
 }
 
 // ── palette ───────────────────────────────────────────────────────────────────
-// One entry per calibrated slot. Configs saved before the RGB refactor carry
-// only h/s/v, so reconstruct RGB from those — a lossy seed, but k-means only
-// needs to land in the right cluster's basin, and then it walks itself to the
-// true centre. That's a nice property of this design: a rough seed self-corrects
-// in a few frames, where the old fixed-reference model would have stayed wrong
-// forever.
+// One entry per calibrated slot. The stored RGB is now used ONLY to decide which
+// discovered cluster this entry claims — it is never itself a match target, and
+// nothing drifts it. Legacy configs carrying only h/s/v still work: a rough
+// colour is plenty to pick out the right cluster.
 export function buildPalette(calibrated) {
   const palette = [];
   for (let i = 0; i < calibrated.length; i++) {
@@ -119,129 +121,195 @@ export function buildPalette(calibrated) {
     if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
       [r, g, b] = hsv2rgb(c.h, c.s, c.v);
     }
-    palette.push({ pi: i, r, g, b });
+    const [L, a, bb] = rgb2lab(r, g, b);
+    palette.push({ pi: i, r, g, b, L, a: a, b: bb });
   }
   return palette;
 }
 
-function paletteKey(palette) {
-  let s = '';
-  for (const p of palette) s += `${p.pi}:${p.r},${p.g},${p.b};`;
-  return s;
-}
-
-// (Re)seed the centres from the taps whenever the calibration changes.
-function ensureSeeded(palette) {
-  const key = paletteKey(palette);
-  if (key === seedKey) return;
-  seeds = palette.map(p => {
-    const [L, a, b] = rgb2lab(p.r, p.g, p.b);
-    return { L, a, b };
-  });
-  centres = seeds.map(s => ({ L: s.L, a: s.a, b: s.b }));
-  seedKey = key;
-}
-
-// Distance from each centre to its nearest neighbouring centre. This is the
-// palette's own length scale, and it's what lets softness and rejection be
-// derived rather than dialled: everything is measured relative to how far apart
-// THIS palette's colours actually are.
-function separations() {
-  const k = centres.length;
-  const sep = new Float32Array(k);
-  for (let i = 0; i < k; i++) {
-    let best = Infinity;
-    for (let j = 0; j < k; j++) {
-      if (i === j) continue;
-      const d = Math.sqrt(dE2(
-        centres[i].L, centres[i].a, centres[i].b,
-        centres[j].L, centres[j].a, centres[j].b));
-      if (d < best) best = d;
-    }
-    // A lone colour has no neighbour; give it a sane default scale so its
-    // softness and rejection still behave.
-    sep[i] = (k < 2 || !Number.isFinite(best)) ? 40 : Math.max(MIN_SEP, best);
+// ── init: k-means++ over the histogram ────────────────────────────────────────
+// Pick the first centre from the frame's most populous colour, then repeatedly
+// pick the cell that is furthest from every centre chosen so far, weighted by
+// how many pixels sit there. That spreads the initial centres across the actual
+// inks instead of clumping them all in the paper (which, on a print, is most of
+// the frame). Standard k-means++, just weighted by the histogram.
+function initCentres(cells) {
+  let bestCell = cells[0], bestPop = 0;
+  for (const cell of cells) {
+    if (hist[cell] > bestPop) { bestPop = hist[cell]; bestCell = cell; }
   }
-  return sep;
+  let li = bestCell * 3;
+  cL[0] = labCube[li]; cA[0] = labCube[li + 1]; cB[0] = labCube[li + 2];
+
+  for (let k = 1; k < K; k++) {
+    let bestScore = -1, pick = bestCell;
+    for (const cell of cells) {
+      const i3 = cell * 3;
+      const L = labCube[i3], a = labCube[i3 + 1], b = labCube[i3 + 2];
+      let dmin = Infinity;
+      for (let j = 0; j < k; j++) {
+        const d = dE2(L, a, b, cL[j], cA[j], cB[j]);
+        if (d < dmin) dmin = d;
+      }
+      const score = dmin * hist[cell];   // far AND populous
+      if (score > bestScore) { bestScore = score; pick = cell; }
+    }
+    const p3 = pick * 3;
+    cL[k] = labCube[p3]; cA[k] = labCube[p3 + 1]; cB[k] = labCube[p3 + 2];
+  }
+  ready = true;
 }
 
-// ── the cube bake ─────────────────────────────────────────────────────────────
-// For every cell of the 5-bit RGB cube, find the nearest centre and how
-// decisively it won. Rebuilt every frame because the centres move every frame —
-// but that's only 32768 × k distance evaluations, cheaper than classifying
-// 77k pixels against k centres directly, and it makes the per-pixel loop a
-// single array read.
-function bakeLUT(sep) {
-  const k = centres.length;
-  const cL = new Float32Array(k), cA = new Float32Array(k), cB = new Float32Array(k);
-  for (let c = 0; c < k; c++) { cL[c] = centres[c].L; cA[c] = centres[c].a; cB[c] = centres[c].b; }
+// ── ownership: which tap claims which GROUP of clusters ───────────────────────
+// Two steps.
+//
+// 1. MERGE. Union-find over clusters closer than MERGE_DE: shards of the same
+//    ink collapse into one group. Without this, a tap claims one shard and the
+//    rest of its own colour reads as background.
+//
+// 2. CLAIM. Each tap claims exactly one GROUP — the one nearest to it — greedily,
+//    closest pair first, no group serving two taps. Every group nobody points at
+//    is background: it competes for its own pixels, keeps the paper off your ink,
+//    and draws nothing.
+//
+// Note there's no radius test on the claim, and that's deliberate. A tap that
+// lands on an ink is always nearest to that ink's own group, so a threshold
+// could only ever create a way for a legitimate tap to claim nothing. Paper
+// stays unclaimed not because it's far, but because nobody pointed at it.
+const parent = new Int8Array(K);
+function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
 
-  for (let cell = 0, li = 0; cell < CUBE; cell++, li += 3) {
-    const L = labCube[li], a = labCube[li + 1], b = labCube[li + 2];
-
-    let d1 = Infinity, d2 = Infinity, win = 0;
-    for (let c = 0; c < k; c++) {
-      const d = dE2(L, a, b, cL[c], cA[c], cB[c]);
-      if (d < d1) { d2 = d1; d1 = d; win = c; }
-      else if (d < d2) { d2 = d; }
+function assignOwners(palette) {
+  // 1. merge
+  for (let j = 0; j < K; j++) parent[j] = j;
+  for (let i = 0; i < K; i++) {
+    for (let j = i + 1; j < K; j++) {
+      if (dE2(cL[i], cA[i], cB[i], cL[j], cA[j], cB[j]) < MERGE_DE * MERGE_DE) {
+        const a = find(i), b = find(j);
+        if (a !== b) parent[a] = b;
+      }
     }
+  }
 
-    const nearest = Math.sqrt(d1);
-    if (nearest > sep[win] * REJECT_MULT) {
-      classLUT[cell] = NO_CLASS;
-      confLUT[cell] = 0;
-      continue;
-    }
+  // group representative → its members' weighted-ish centre is just the rep's
+  // own centre; shards are within MERGE_DE by construction, so any member is a
+  // fine stand-in for the group's colour.
+  const roots = [];
+  for (let j = 0; j < K; j++) if (find(j) === j) roots.push(j);
 
-    let conf = 255;
-    if (k > 1) {
-      const margin = Math.sqrt(d2) - nearest;
-      const ramp = Math.max(1, sep[win] * SOFT_FRAC);
-      conf = Math.max(0, Math.min(255, Math.round((margin / ramp) * 255)));
+  // 2. claim
+  clusterOwner.fill(-1);
+  const groupOwner = new Map();   // root → palette index
+  const usedRoot = new Set();
+  const usedP = new Uint8Array(palette.length);
+  const steps = Math.min(roots.length, palette.length);
+
+  for (let s = 0; s < steps; s++) {
+    let best = null;
+    for (let p = 0; p < palette.length; p++) {
+      if (usedP[p]) continue;
+      for (const r of roots) {
+        if (usedRoot.has(r)) continue;
+        const d = dE2(palette[p].L, palette[p].a, palette[p].b, cL[r], cA[r], cB[r]);
+        if (!best || d < best.d) best = { p, r, d };
+      }
     }
-    classLUT[cell] = win;
-    confLUT[cell] = conf;
+    if (!best) break;
+    groupOwner.set(best.r, best.p);
+    usedRoot.add(best.r); usedP[best.p] = 1;
+  }
+
+  for (let j = 0; j < K; j++) {
+    const r = find(j);
+    clusterOwner[j] = groupOwner.has(r) ? groupOwner.get(r) : -1;
   }
 }
 
 // ── the frame pass ────────────────────────────────────────────────────────────
-// img: RGBA from getImageData. Assigns every pixel, folds the result into the
-// per-class EMA alpha fields, and takes one k-means step so the centres track
-// the real inks. Read the result via classAlpha(c).
 export function quantizeFrame(img, palette, w, h) {
   const n = w * h;
   const k = palette.length;
   if (!k || !pxClass || pxClass.length !== n) return;
 
-  ensureSeeded(palette);
-  const sep = separations();
-  bakeLUT(sep);
-
-  // k-means accumulators, in Lab
-  const sL = new Float64Array(k), sA = new Float64Array(k), sB = new Float64Array(k);
-  const cnt = new Float64Array(k);
-
+  // 1. histogram the frame over the colour cube
+  hist.fill(0);
+  const cells = [];
   for (let p = 0, q = 0; p < n; p++, q += 4) {
     const cell = cubeIndex(img[q], img[q + 1], img[q + 2]);
-    const c = classLUT[cell];
-    const conf = confLUT[cell];
-    pxClass[p] = c;
-    pxConf[p] = conf;
+    if (hist[cell]++ === 0) cells.push(cell);
+  }
+  if (!cells.length) return;
 
-    // Only confident pixels move the centres. Boundary pixels are literally a
-    // blend of two inks — averaging them in would drag every centre toward its
-    // neighbours, and over enough frames the whole palette would implode toward
-    // its own mean. Excluding them is what keeps k-means stable here.
-    if (c !== NO_CLASS && conf > 200) {
-      const li = cell * 3;
-      sL[c] += labCube[li]; sA[c] += labCube[li + 1]; sB[c] += labCube[li + 2];
-      cnt[c]++;
+  if (!ready) initCentres(cells);
+
+  // 2. who owns what, from the current taps
+  assignOwners(palette);
+
+  // 3. assign every POPULATED cell to its nearest cluster, and in the same pass
+  //    accumulate the weighted means for the k-means update. Only populated
+  //    cells are touched — typically a few thousand, not all 32768, and never
+  //    the 77k pixels themselves.
+  const sL = new Float64Array(K), sA = new Float64Array(K), sB = new Float64Array(K);
+  const wt = new Float64Array(K);
+
+  let worstCell = cells[0], worstScore = -1;
+
+  for (const cell of cells) {
+    const i3 = cell * 3;
+    const L = labCube[i3], a = labCube[i3 + 1], b = labCube[i3 + 2];
+
+    // nearest cluster overall
+    let d1 = Infinity, k1 = 0;
+    for (let j = 0; j < K; j++) {
+      const d = dE2(L, a, b, cL[j], cA[j], cB[j]);
+      if (d < d1) { d1 = d; k1 = j; }
     }
+
+    const owner = clusterOwner[k1];
+    const wgt = hist[cell];
+
+    sL[k1] += L * wgt; sA[k1] += a * wgt; sB[k1] += b * wgt; wt[k1] += wgt;
+
+    // track the frame's worst-modelled populous colour, for re-seeding a dead
+    // cluster onto it below
+    const score = d1 * wgt;
+    if (score > worstScore) { worstScore = score; worstCell = cell; }
+
+    if (owner < 0) { cellOwner[cell] = NO_CLASS; cellConf[cell] = 0; continue; }
+
+    // Nearest cluster with a DIFFERENT owner. This is the key subtlety: the
+    // margin must be measured against another OWNER, not merely another
+    // cluster. If an ink ever splits across two clusters, the seam between them
+    // is internal — it must not produce a soft, faded edge down the middle of a
+    // region that is, to the user, a single colour.
+    let d2 = Infinity;
+    for (let j = 0; j < K; j++) {
+      if (clusterOwner[j] === owner) continue;
+      const d = dE2(L, a, b, cL[j], cA[j], cB[j]);
+      if (d < d2) d2 = d;
+    }
+
+    let conf = 255;
+    if (Number.isFinite(d2)) {
+      const sep = Math.sqrt(d2) - Math.sqrt(d1);
+      // ramp scaled to how far this cluster sits from its nearest rival owner
+      const ramp = Math.max(1, Math.sqrt(d2) * SOFT_FRAC);
+      conf = Math.max(0, Math.min(255, Math.round((sep / ramp) * 255)));
+    }
+    cellOwner[cell] = owner;
+    cellConf[cell] = conf;
   }
 
-  // EMA the per-class membership fields. Done for every class, not just the
-  // winner, so a class fades OUT smoothly where it loses ground instead of
-  // snapping to zero.
+  // 4. per-pixel lookup — one array read each
+  for (let p = 0, q = 0; p < n; p++, q += 4) {
+    const cell = cubeIndex(img[q], img[q + 1], img[q + 2]);
+    pxClass[p] = cellOwner[cell];
+    pxConf[p] = cellConf[cell];
+  }
+
+  // 5. EMA the per-owner membership fields. Done for every owner, not just the
+  //    winner, so an owner fades OUT smoothly where it loses ground rather than
+  //    snapping to zero.
   for (let c = 0; c < k; c++) {
     const f = alpha[c];
     for (let p = 0; p < n; p++) {
@@ -250,50 +318,24 @@ export function quantizeFrame(img, palette, w, h) {
     }
   }
 
-  stepCentres(sL, sA, sB, cnt);
+  stepCentres(sL, sA, sB, wt, n, worstCell);
 }
 
-// One k-means update, leashed. Each centre eases toward the mean of the pixels
-// it caught — but never further than MAX_DRIFT from the colour that was tapped,
-// which is what stops a centre from sliding off its ink onto a neighbour's and
-// silently redefining what the user's label means.
-function stepCentres(sL, sA, sB, cnt) {
-  const k = centres.length;
-  for (let c = 0; c < k; c++) {
-    if (cnt[c] < MIN_MEMBERS) continue;   // ink occluded — hold position
-
-    const mL = sL[c] / cnt[c], mA = sA[c] / cnt[c], mB = sB[c] / cnt[c];
-
-    let nL = centres[c].L + (mL - centres[c].L) * CENTRE_EMA;
-    let nA = centres[c].a + (mA - centres[c].a) * CENTRE_EMA;
-    let nB = centres[c].b + (mB - centres[c].b) * CENTRE_EMA;
-
-    // leash to the seed
-    const s = seeds[c];
-    const d = Math.sqrt(dE2(nL, nA, nB, s.L, s.a, s.b));
-    if (d > MAX_DRIFT) {
-      const t = MAX_DRIFT / d;
-      nL = s.L + (nL - s.L) * t;
-      nA = s.a + (nA - s.a) * t;
-      nB = s.b + (nB - s.b) * t;
+// One Lloyd update, eased. A starved cluster is re-seeded onto the frame's
+// worst-modelled populous colour — which is how a new ink entering the scene
+// gets a cluster of its own instead of being swallowed by a neighbour.
+function stepCentres(sL, sA, sB, wt, n, worstCell) {
+  const dead = n * DEAD_FRAC;
+  for (let j = 0; j < K; j++) {
+    if (wt[j] < dead) {
+      const w3 = worstCell * 3;
+      cL[j] = labCube[w3]; cA[j] = labCube[w3 + 1]; cB[j] = labCube[w3 + 2];
+      continue;
     }
-
-    centres[c] = { L: nL, a: nA, b: nB };
-  }
-
-  // Don't let two centres collapse onto each other. If they've closed to within
-  // MIN_SEP, push them back to their seeds — a degenerate palette (the same ink
-  // tapped twice) should stay stable and separate, not oscillate.
-  for (let i = 0; i < k; i++) {
-    for (let j = i + 1; j < k; j++) {
-      const d = Math.sqrt(dE2(
-        centres[i].L, centres[i].a, centres[i].b,
-        centres[j].L, centres[j].a, centres[j].b));
-      if (d < MIN_SEP) {
-        centres[i] = { L: seeds[i].L, a: seeds[i].a, b: seeds[i].b };
-        centres[j] = { L: seeds[j].L, a: seeds[j].a, b: seeds[j].b };
-      }
-    }
+    const mL = sL[j] / wt[j], mA = sA[j] / wt[j], mB = sB[j] / wt[j];
+    cL[j] += (mL - cL[j]) * CENTRE_EMA;
+    cA[j] += (mA - cA[j]) * CENTRE_EMA;
+    cB[j] += (mB - cB[j]) * CENTRE_EMA;
   }
 }
 
