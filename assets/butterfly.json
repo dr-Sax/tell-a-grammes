@@ -1,7 +1,4 @@
 {
-  "htol": 7,
-  "stol": 28,
-  "vtol": 80,
   "minArea": 20,
   "assets": [
     { "type": "gif", "url": "https://media3.giphy.com/media/0K1NGNF6WaC02Z3ySG/200.gif" },
@@ -9,15 +6,14 @@
     { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXAwcjRvdXR5eWJoMHl5YnlqN21nZWlsZGtmaXM1dnE5aWRjbjN3NCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/uYsuqAWsJX8sw/giphy.gif" },
     { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW92NmQ3MXNpeXVsMm9veGV1emxuYXRnZWdxd2EzdGZ2d2E5Mms5byZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Y34v7S5jENXAdbkfYh/giphy.gif" },
     { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZGM3b2dwbmluYWZ4eWZiZmRzZ2IxdXgxM3FuMjFnZGF5N3ZrNTAzNiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/RgZ26pD6oow12/giphy.gif" }
-    
   ],
   "pieces": [
     {
       "name": "Piece 1",
       "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
-      "h": 67.02111746637266,
-      "s": 0.4317618726367682,
-      "v": 0.7706154684095853,
+      "r": 200,
+      "g": 190,
+      "b": 50,
       "media": {
         "type": "sequence",
         "timeline": {
@@ -30,9 +26,9 @@
     {
       "name": "Piece 2",
       "adjust": { "zoom": 1, "rotate": -29.46, "xshift": 0.12, "yshift": 0.24 },
-      "h": 312.2986131480054,
-      "s": 0.34843287259743444,
-      "v": 0.7615468409586055,
+      "r": 195,
+      "g": 125,
+      "b": 195,
       "media": {
         "type": "caption",
         "cues": {
@@ -47,9 +43,9 @@
     {
       "name": "Piece 3",
       "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
-      "h": 196.95853430430475,
-      "s": 0.6440421231932514,
-      "v": 0.876062091503267,
+      "r": 80,
+      "g": 200,
+      "b": 225,
       "media": {
         "type": "sequence",
         "timeline": {
@@ -62,9 +58,9 @@
     {
       "name": "Piece 4",
       "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
-      "h": 338.6022985786841,
-      "s": 0.3547927410556826,
-      "v": 0.8441176470588222,
+      "r": 215,
+      "g": 140,
+      "b": 170,
       "media": {
         "type": "sequence",
         "timeline": {
