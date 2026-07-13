@@ -1,70 +1,100 @@
-// ── quantize: per-pixel nearest-palette classification ────────────────────────
-// Replaces the old HSV band-per-piece approach. Every calibrated colour is a
-// palette entry, and every pixel is assigned to the entry it is NEAREST to —
-// a competition, not N independent tolerance boxes. That single change is what
-// lets two near-identical blues (the "Ey Es" marker) separate cleanly: the
-// decision boundary between them lands on their perpendicular bisector for
-// free, with no tolerance tuning at all.
+// ── quantize: seeded k-means in CIELAB ────────────────────────────────────────
+// Two changes from the RGB version, and together they remove every colour
+// slider from the app.
 //
-// Three things sit on top of the bare argmin:
+// 1. CIELAB. Perceptually uniform, so plain ΔE needs no lightness/chroma
+//    weight. `lumaW` is gone — it was a fudge factor for RGB's non-uniformity,
+//    and it could never be right for red-vs-black and blue-vs-blue at the same
+//    time. See lab.js.
 //
-//   1. WHITE-POINT GAIN. A per-channel (von Kries) gain, estimated each frame
-//      by comparing every class's observed mean RGB to its calibrated
-//      reference, and EMA-smoothed across frames. This is what absorbs
-//      lighting / white-balance / device drift, and it replaces match.js's
-//      global hue rotation θ. It's strictly stronger than θ was (it corrects
-//      tint AND exposure, not just hue) and it's ~20 lines. Chicken-and-egg is
-//      resolved the usual way: classify with the PREVIOUS frame's gain, then
-//      refine. Lighting doesn't change frame to frame, so this is exact enough.
+// 2. THE TAPS ARE SEEDS, NOT REFERENCES. This is the real shift. A flat-ink
+//    print, seen by a camera, doesn't produce pixels scattered around some ideal
+//    colour — it produces K TIGHT CLUSTERS, one per ink, plus a thin smear of
+//    edge pixels between them. That structure is already in the frame. We don't
+//    have to guess where an ink sits; we can just find it.
 //
-//   2. SOFT MEMBERSHIP. argmin also hands us the runner-up distance, so we get
-//      a confidence for free: how much better is the winner than second place?
-//      Pixels deep inside a colour score 1.0; pixels straddling a boundary (or
-//      sitting on an anti-aliased print edge) fade toward 0. That's antialiasing
-//      and ambiguity-rejection in one number, and it's why the stencil edges
-//      come out smooth instead of stair-stepped.
+//    So a tap no longer says "red is exactly RGB(200,30,40)". It says "the
+//    cluster I'm pointing at is the one I want the GIF in" — a LABEL. Each
+//    frame we run a k-means step against the live pixels: assign every pixel to
+//    its nearest centre, then move each centre to the mean of what it caught.
 //
-//   3. TEMPORAL EMA. A per-class Float32 alpha field, EMA'd frame to frame.
-//      Boundary pixels flip class under sensor noise; without this the media
-//      edge crawls. Smoothing the ALPHA (not the polygon, which no longer
-//      exists) kills the shimmer at its source.
+// What that buys, all for free:
 //
-// The hot loop is a lookup, not arithmetic: we precompute a 5-bit RGB cube
-// (32768 entries → class + confidence) whenever the palette or gain moves, so
-// per-pixel work is two array reads. Rebuilding the cube costs ~33k distance
-// evaluations; classifying naively would cost 77k × N. The LUT wins by ~20×
-// AND is less code.
+//   • No white-point gain. The old von Kries estimate existed to drag a FIXED
+//     palette back under changing light. The palette isn't fixed any more — the
+//     centres ARE the observed inks, so when the lighting shifts, the clusters
+//     drift and the centres follow. The gain machinery, its EMA, its median
+//     voting, and the G reset key are all deleted.
+//
+//   • No `soft` slider. Confidence ramps over a fraction of the distance to the
+//     nearest OTHER centre. Well-separated palettes get crisp edges; tight
+//     palettes get gentle ones. Correct by construction, at any palette.
+//
+//   • No `reject` slider. "Too far from every centre" is likewise measured
+//     against the palette's own scale, not an absolute number in units nobody
+//     can reason about.
+//
+// What survives: minArea, which isn't a colour dial at all — it's a real design
+// choice about the smallest region you care about.
 
-import { params } from './config.js';
+import { labCube, cubeIndex, CUBE, dE2, rgb2lab } from './lab.js';
 import { hsv2rgb } from './hsv.js';
 
-// 5 bits per channel: 32 levels, 32768 cube entries. Quantization error is
-// ~4/255 per channel — comfortably under camera sensor noise, and the soft
-// membership above smooths right over it.
-const BITS = 5;
-const LEVELS = 1 << BITS;              // 32
-const CUBE = LEVELS * LEVELS * LEVELS; // 32768
-const SHIFT = 8 - BITS;                // 3
-
-// Sentinel class for "nothing in the palette is close enough".
+// Sentinel class for "this pixel belongs to no ink".
 export const NO_CLASS = 255;
 
-let classLUT = new Uint8Array(CUBE);
-let confLUT  = new Uint8Array(CUBE);
+// ── constants (deliberately not sliders) ──────────────────────────────────────
 
-// Per-pixel scratch (allocated in allocBuffers)
-let pxClass = null;   // Uint8Array(n)  — winning class index, or NO_CLASS
-let pxConf  = null;   // Uint8Array(n)  — 0-255 soft membership
-let alpha   = [];     // Float32Array(n) per class — the EMA'd stencil field
+// How fast a centre chases the cluster mean. Lighting drifts slowly; sensor
+// noise doesn't. Low enough to be steady, high enough to track a lamp change.
+const CENTRE_EMA = 0.15;
 
-// Session white-point gain (per channel). Multiplies the OBSERVED pixel to
-// bring it back onto the calibrated reference. Persisted across frames.
-let gain = [1, 1, 1];
-let lastGain = [0, 0, 0];   // the gain the current LUT was baked with
-let lutKey = '';            // palette+params signature the LUT was baked with
+// A centre may not wander further than this (ΔE) from the colour that was
+// actually tapped. Without an anchor, k-means is free to slide a centre off its
+// ink and onto a neighbouring one — the classic bad-init failure — and the
+// user's label would silently come to mean a different colour. This is the
+// leash: enough slack for any plausible illuminant shift, not enough to defect.
+const MAX_DRIFT = 45;
 
-export function resetGain() { gain = [1, 1, 1]; lastGain = [0, 0, 0]; lutKey = ''; }
-export function getGain() { return gain.slice(); }
+// Two centres closer than this are, for our purposes, the same ink. Freeze them
+// rather than let them collapse onto each other and fight over pixels.
+const MIN_SEP = 5;
+
+// Confidence ramps over this fraction of the distance to the nearest other
+// centre. A pixel wins its class outright when it beats the runner-up by that
+// much; below it, alpha fades. Scale-free: it means the same thing whether the
+// palette is three garish inks or two nearly identical blues.
+const SOFT_FRAC = 0.35;
+
+// A pixel further than this multiple of the nearest-neighbour separation from
+// EVERY centre isn't any of the inks (a hand, deep shadow, something off-sheet).
+const REJECT_MULT = 1.6;
+
+// Temporal smoothing on the per-class membership fields. Boundary pixels flip
+// class under sensor noise; without this, the media edge crawls. Smoothing the
+// ALPHA — not a polygon, there isn't one — kills the shimmer at its source.
+const ALPHA_EMA = 0.45;
+
+// A cluster needs at least this many pixels before we trust its mean enough to
+// move its centre. Stops a centre from chasing a handful of noise pixels when
+// its ink is occluded.
+const MIN_MEMBERS = 40;
+
+// ── state ─────────────────────────────────────────────────────────────────────
+
+let classLUT = new Uint8Array(CUBE);   // cube cell → winning class
+let confLUT  = new Uint8Array(CUBE);   // cube cell → 0-255 soft membership
+
+let pxClass = null;    // Uint8Array(n)
+let pxConf  = null;    // Uint8Array(n)
+let alpha   = [];      // Float32Array(n) per class — the EMA'd stencil field
+
+// Live cluster centres in Lab, and the seeds they're leashed to.
+let centres = [];      // [{ L, a, b }]
+let seeds   = [];      // [{ L, a, b }] — from the taps; never move
+let seedKey = '';      // signature of the calibration the centres were seeded from
+
+export function resetClusters() { seedKey = ''; centres = []; seeds = []; }
 
 export function allocQuantBuffers(w, h, nClasses) {
   const n = w * h;
@@ -74,11 +104,12 @@ export function allocQuantBuffers(w, h, nClasses) {
 }
 
 // ── palette ───────────────────────────────────────────────────────────────────
-// Build the active palette from state.calibrated. Entries carry their piece
-// index so the caller can map class → piece. Old configs saved before this
-// refactor only have { h, s, v }, so we derive RGB from them — a lossy but
-// perfectly usable starting point that gets refined the moment the user
-// re-taps a piece.
+// One entry per calibrated slot. Configs saved before the RGB refactor carry
+// only h/s/v, so reconstruct RGB from those — a lossy seed, but k-means only
+// needs to land in the right cluster's basin, and then it walks itself to the
+// true centre. That's a nice property of this design: a rough seed self-corrects
+// in a few frames, where the old fixed-reference model would have stayed wrong
+// forever.
 export function buildPalette(calibrated) {
   const palette = [];
   for (let i = 0; i < calibrated.length; i++) {
@@ -93,193 +124,180 @@ export function buildPalette(calibrated) {
   return palette;
 }
 
-// ── distance ──────────────────────────────────────────────────────────────────
-// Squared distance in a luma/chroma-weighted space. No sqrt — argmin over d²
-// gives the identical winner, and we only take a root once at the very end for
-// the confidence margin.
-//
-// params.lumaW is the single dial that used to be htol/stol/vtol:
-//   lumaW = 1   → essentially plain RGB distance. Brightness counts fully.
-//   lumaW → 0   → chroma only; brightness ignored (shading-proof, but then
-//                 light-blue and dark-blue MERGE, and white/grey/black become
-//                 indistinguishable).
-// For a printed marker under steady light — which is exactly this case — you
-// WANT brightness to count: it's the only axis separating the two Ey Es blues,
-// and it's the only axis that exists at all for white/black. So the default is
-// high. The dial is there for the day the lighting stops cooperating.
-function dist2(dr, dg, db, lumaW) {
-  const dY = 0.299 * dr + 0.587 * dg + 0.114 * db;
-  const cr = dr - dY, cg = dg - dY, cb = db - dY;
-  return cr * cr + cg * cg + cb * cb + lumaW * 3 * dY * dY;
-}
-
-// ── LUT bake ──────────────────────────────────────────────────────────────────
-// For every cell of the 5-bit RGB cube, find the nearest palette entry and how
-// decisively it won. Baked against the palette PRE-DIVIDED by the current gain,
-// which is equivalent to gain-correcting every pixel but costs O(palette)
-// instead of O(pixels).
-function bakeLUT(palette) {
-  const lumaW = params.lumaW;
-  const soft = Math.max(1, params.soft);
-  const reject2 = params.reject * params.reject;
-  const k = palette.length;
-
-  // reference colours in observed space (i.e. undo the gain on the refs)
-  const rr = new Float32Array(k), rg = new Float32Array(k), rb = new Float32Array(k);
-  for (let c = 0; c < k; c++) {
-    rr[c] = palette[c].r / gain[0];
-    rg[c] = palette[c].g / gain[1];
-    rb[c] = palette[c].b / gain[2];
-  }
-
-  const step = 255 / (LEVELS - 1);
-  let idx = 0;
-  for (let ri = 0; ri < LEVELS; ri++) {
-    const r = ri * step;
-    for (let gi = 0; gi < LEVELS; gi++) {
-      const g = gi * step;
-      for (let bi = 0; bi < LEVELS; bi++, idx++) {
-        const b = bi * step;
-
-        let d1 = Infinity, d2 = Infinity, win = NO_CLASS;
-        for (let c = 0; c < k; c++) {
-          const d = dist2(r - rr[c], g - rg[c], b - rb[c], lumaW);
-          if (d < d1) { d2 = d1; d1 = d; win = c; }
-          else if (d < d2) { d2 = d; }
-        }
-
-        if (win === NO_CLASS || d1 > reject2) {
-          classLUT[idx] = NO_CLASS;
-          confLUT[idx] = 0;
-          continue;
-        }
-
-        // Confidence = how far ahead the winner is, in plain distance units,
-        // ramped over `soft`. One palette entry → always fully confident.
-        let conf = 255;
-        if (k > 1) {
-          const margin = Math.sqrt(d2) - Math.sqrt(d1);
-          conf = Math.max(0, Math.min(255, Math.round((margin / soft) * 255)));
-        }
-        classLUT[idx] = win;
-        confLUT[idx] = conf;
-      }
-    }
-  }
-}
-
 function paletteKey(palette) {
-  let s = `${params.lumaW}|${params.soft}|${params.reject}|`;
-  for (const p of palette) s += `${p.pi}:${p.r | 0},${p.g | 0},${p.b | 0};`;
+  let s = '';
+  for (const p of palette) s += `${p.pi}:${p.r},${p.g},${p.b};`;
   return s;
 }
 
-// Re-bake only when something actually moved. The gain drifts by tiny amounts
-// every frame under EMA, so we gate on a threshold rather than exact equality —
-// otherwise we'd rebuild 30×/sec for a change too small to alter any decision.
-function ensureLUT(palette) {
+// (Re)seed the centres from the taps whenever the calibration changes.
+function ensureSeeded(palette) {
   const key = paletteKey(palette);
-  const moved =
-    Math.abs(gain[0] - lastGain[0]) > 0.004 ||
-    Math.abs(gain[1] - lastGain[1]) > 0.004 ||
-    Math.abs(gain[2] - lastGain[2]) > 0.004;
-  if (key === lutKey && !moved) return;
-  bakeLUT(palette);
-  lutKey = key;
-  lastGain = gain.slice();
+  if (key === seedKey) return;
+  seeds = palette.map(p => {
+    const [L, a, b] = rgb2lab(p.r, p.g, p.b);
+    return { L, a, b };
+  });
+  centres = seeds.map(s => ({ L: s.L, a: s.a, b: s.b }));
+  seedKey = key;
+}
+
+// Distance from each centre to its nearest neighbouring centre. This is the
+// palette's own length scale, and it's what lets softness and rejection be
+// derived rather than dialled: everything is measured relative to how far apart
+// THIS palette's colours actually are.
+function separations() {
+  const k = centres.length;
+  const sep = new Float32Array(k);
+  for (let i = 0; i < k; i++) {
+    let best = Infinity;
+    for (let j = 0; j < k; j++) {
+      if (i === j) continue;
+      const d = Math.sqrt(dE2(
+        centres[i].L, centres[i].a, centres[i].b,
+        centres[j].L, centres[j].a, centres[j].b));
+      if (d < best) best = d;
+    }
+    // A lone colour has no neighbour; give it a sane default scale so its
+    // softness and rejection still behave.
+    sep[i] = (k < 2 || !Number.isFinite(best)) ? 40 : Math.max(MIN_SEP, best);
+  }
+  return sep;
+}
+
+// ── the cube bake ─────────────────────────────────────────────────────────────
+// For every cell of the 5-bit RGB cube, find the nearest centre and how
+// decisively it won. Rebuilt every frame because the centres move every frame —
+// but that's only 32768 × k distance evaluations, cheaper than classifying
+// 77k pixels against k centres directly, and it makes the per-pixel loop a
+// single array read.
+function bakeLUT(sep) {
+  const k = centres.length;
+  const cL = new Float32Array(k), cA = new Float32Array(k), cB = new Float32Array(k);
+  for (let c = 0; c < k; c++) { cL[c] = centres[c].L; cA[c] = centres[c].a; cB[c] = centres[c].b; }
+
+  for (let cell = 0, li = 0; cell < CUBE; cell++, li += 3) {
+    const L = labCube[li], a = labCube[li + 1], b = labCube[li + 2];
+
+    let d1 = Infinity, d2 = Infinity, win = 0;
+    for (let c = 0; c < k; c++) {
+      const d = dE2(L, a, b, cL[c], cA[c], cB[c]);
+      if (d < d1) { d2 = d1; d1 = d; win = c; }
+      else if (d < d2) { d2 = d; }
+    }
+
+    const nearest = Math.sqrt(d1);
+    if (nearest > sep[win] * REJECT_MULT) {
+      classLUT[cell] = NO_CLASS;
+      confLUT[cell] = 0;
+      continue;
+    }
+
+    let conf = 255;
+    if (k > 1) {
+      const margin = Math.sqrt(d2) - nearest;
+      const ramp = Math.max(1, sep[win] * SOFT_FRAC);
+      conf = Math.max(0, Math.min(255, Math.round((margin / ramp) * 255)));
+    }
+    classLUT[cell] = win;
+    confLUT[cell] = conf;
+  }
 }
 
 // ── the frame pass ────────────────────────────────────────────────────────────
-// img: RGBA Uint8ClampedArray from getImageData. Classifies every pixel, folds
-// the result into the per-class EMA alpha fields, and updates the gain estimate
-// for next frame. Returns nothing — read the fields via classAlpha(c).
+// img: RGBA from getImageData. Assigns every pixel, folds the result into the
+// per-class EMA alpha fields, and takes one k-means step so the centres track
+// the real inks. Read the result via classAlpha(c).
 export function quantizeFrame(img, palette, w, h) {
   const n = w * h;
   const k = palette.length;
   if (!k || !pxClass || pxClass.length !== n) return;
 
-  ensureLUT(palette);
+  ensureSeeded(palette);
+  const sep = separations();
+  bakeLUT(sep);
 
-  // Accumulators for the gain estimate: per-class mean observed RGB.
-  const sr = new Float64Array(k), sg = new Float64Array(k), sb = new Float64Array(k);
+  // k-means accumulators, in Lab
+  const sL = new Float64Array(k), sA = new Float64Array(k), sB = new Float64Array(k);
   const cnt = new Float64Array(k);
 
   for (let p = 0, q = 0; p < n; p++, q += 4) {
-    const r = img[q], g = img[q + 1], b = img[q + 2];
-    const li = ((r >> SHIFT) << (BITS * 2)) | ((g >> SHIFT) << BITS) | (b >> SHIFT);
-    const c = classLUT[li];
+    const cell = cubeIndex(img[q], img[q + 1], img[q + 2]);
+    const c = classLUT[cell];
+    const conf = confLUT[cell];
     pxClass[p] = c;
-    const conf = confLUT[li];
     pxConf[p] = conf;
 
-    // Only high-confidence pixels vote on the gain — boundary/ambiguous pixels
-    // are exactly the ones whose colour is a blend of two references, and
-    // averaging those in would bias every class toward its neighbours.
+    // Only confident pixels move the centres. Boundary pixels are literally a
+    // blend of two inks — averaging them in would drag every centre toward its
+    // neighbours, and over enough frames the whole palette would implode toward
+    // its own mean. Excluding them is what keeps k-means stable here.
     if (c !== NO_CLASS && conf > 200) {
-      sr[c] += r; sg[c] += g; sb[c] += b; cnt[c]++;
+      const li = cell * 3;
+      sL[c] += labCube[li]; sA[c] += labCube[li + 1]; sB[c] += labCube[li + 2];
+      cnt[c]++;
     }
   }
 
-  // EMA the per-class alpha fields. `target` is the soft membership if this
-  // pixel won for that class, else 0. Doing it per class (rather than only for
-  // the winner) is what makes a class fade OUT smoothly when it loses a pixel,
-  // instead of snapping to zero.
-  const a = Math.max(0.01, Math.min(1, params.ema));
+  // EMA the per-class membership fields. Done for every class, not just the
+  // winner, so a class fades OUT smoothly where it loses ground instead of
+  // snapping to zero.
   for (let c = 0; c < k; c++) {
     const f = alpha[c];
     for (let p = 0; p < n; p++) {
       const target = (pxClass[p] === c) ? pxConf[p] / 255 : 0;
-      f[p] += (target - f[p]) * a;
+      f[p] += (target - f[p]) * ALPHA_EMA;
     }
   }
 
-  updateGain(palette, sr, sg, sb, cnt);
+  stepCentres(sL, sA, sB, cnt);
 }
 
-// Diagonal (von Kries) white-point correction. For each class with enough
-// confident pixels we get a per-channel ratio ref/observed; the frame's gain is
-// the MEDIAN of those ratios across classes, which is robust to one class being
-// blown out by a specular hotspot or clipped to black. Then EMA into the
-// session gain — real lighting doesn't jump, so we want a slow, steady estimate,
-// not a per-frame twitch.
-//
-// Note this needs no dedicated white patch: any known reference colour tells
-// you how the illuminant is distorting the channels. Using all of them and
-// taking the median is both simpler and sturdier than trusting one white swatch.
-const GAIN_EMA = 0.08;
-const MIN_VOTES = 60;   // proc-px of confident coverage before a class may vote
+// One k-means update, leashed. Each centre eases toward the mean of the pixels
+// it caught — but never further than MAX_DRIFT from the colour that was tapped,
+// which is what stops a centre from sliding off its ink onto a neighbour's and
+// silently redefining what the user's label means.
+function stepCentres(sL, sA, sB, cnt) {
+  const k = centres.length;
+  for (let c = 0; c < k; c++) {
+    if (cnt[c] < MIN_MEMBERS) continue;   // ink occluded — hold position
 
-function median(arr) {
-  if (!arr.length) return 1;
-  const s = arr.slice().sort((x, y) => x - y);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
+    const mL = sL[c] / cnt[c], mA = sA[c] / cnt[c], mB = sB[c] / cnt[c];
 
-function updateGain(palette, sr, sg, sb, cnt) {
-  const gr = [], gg = [], gb = [];
-  for (let c = 0; c < palette.length; c++) {
-    if (cnt[c] < MIN_VOTES) continue;
-    const or_ = sr[c] / cnt[c], og = sg[c] / cnt[c], ob = sb[c] / cnt[c];
-    // A near-zero observed channel (a black class's blue, say) gives a wild
-    // ratio — skip those rather than let them dominate the median.
-    if (or_ > 12 && palette[c].r > 12) gr.push(palette[c].r / or_);
-    if (og  > 12 && palette[c].g > 12) gg.push(palette[c].g / og);
-    if (ob  > 12 && palette[c].b > 12) gb.push(palette[c].b / ob);
+    let nL = centres[c].L + (mL - centres[c].L) * CENTRE_EMA;
+    let nA = centres[c].a + (mA - centres[c].a) * CENTRE_EMA;
+    let nB = centres[c].b + (mB - centres[c].b) * CENTRE_EMA;
+
+    // leash to the seed
+    const s = seeds[c];
+    const d = Math.sqrt(dE2(nL, nA, nB, s.L, s.a, s.b));
+    if (d > MAX_DRIFT) {
+      const t = MAX_DRIFT / d;
+      nL = s.L + (nL - s.L) * t;
+      nA = s.a + (nA - s.a) * t;
+      nB = s.b + (nB - s.b) * t;
+    }
+
+    centres[c] = { L: nL, a: nA, b: nB };
   }
-  if (gr.length < 2 || gg.length < 2 || gb.length < 2) return;  // not enough to fix a gain
 
-  const target = [median(gr), median(gg), median(gb)];
-  for (let i = 0; i < 3; i++) {
-    // clamp: a gain outside ~±60% means something is badly wrong (a hand over
-    // the whole marker, the lights off) — don't let a bad frame poison θ's
-    // successor the way a single bad estimate could.
-    const t = Math.max(0.6, Math.min(1.6, target[i]));
-    gain[i] += (t - gain[i]) * GAIN_EMA;
+  // Don't let two centres collapse onto each other. If they've closed to within
+  // MIN_SEP, push them back to their seeds — a degenerate palette (the same ink
+  // tapped twice) should stay stable and separate, not oscillate.
+  for (let i = 0; i < k; i++) {
+    for (let j = i + 1; j < k; j++) {
+      const d = Math.sqrt(dE2(
+        centres[i].L, centres[i].a, centres[i].b,
+        centres[j].L, centres[j].a, centres[j].b));
+      if (d < MIN_SEP) {
+        centres[i] = { L: seeds[i].L, a: seeds[i].a, b: seeds[i].b };
+        centres[j] = { L: seeds[j].L, a: seeds[j].a, b: seeds[j].b };
+      }
+    }
   }
 }
 
-// The EMA'd 0-1 membership field for class index c (indexes into the palette
-// array, NOT the piece array). Live buffer — read it, don't keep it.
+// The EMA'd 0-1 membership field for palette index c. Live buffer — read it,
+// don't retain it.
 export function classAlpha(c) { return alpha[c]; }
 export function pixelClasses() { return pxClass; }

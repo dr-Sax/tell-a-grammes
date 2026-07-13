@@ -1,12 +1,11 @@
 // ── main: orchestration + frame loop ──────────────────────────────────────────
 // Entry point. Wires the modules together and runs the per-frame pipeline.
 //
-// The pipeline is now one pass, not three. There is no longer a "blob mode" vs
-// "match mode" vs "fill mode": those were three different answers to "which
-// pixels belong to this colour", and the quantizer answers it once, for every
-// colour simultaneously. What used to be fill mode is now simply the mode.
+// One pass, not three. There is no longer a "blob mode" vs "match mode" vs
+// "fill mode": those were three different answers to "which pixels belong to
+// this colour", and the quantizer answers it once, for every colour at once.
 //
-//   frame → classify every pixel to its nearest calibrated colour
+//   frame → assign every pixel to its nearest ink cluster (CIELAB k-means)
 //         → per colour: smoothed membership field → RGBA stencil
 //         → per colour: pour that colour's media through the stencil
 //
@@ -20,23 +19,13 @@ import {
 } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { classifyFrame, detectClassStencil } from './tracker.js';
-import { resetGain, getGain } from './quantize.js';
+import { resetClusters } from './quantize.js';
 import { renderDebugBar, drawFillOverlay } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider } from './ui.js';
 import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 import { renderStereoGL } from './stereoGL.js';
-
-// The white-point gain is session state (see quantize.js). If you walk into a
-// different room mid-session and the estimate has settled somewhere stale, G
-// drops it and lets it re-acquire from the next frame.
-window.addEventListener('keydown', e => {
-  if (e.key === 'g' || e.key === 'G') {
-    resetGain();
-    statusEl.textContent = 'White-point gain reset — re-acquiring';
-  }
-});
 
 function processFrame(now) {
   if (!state.running) return;
@@ -70,11 +59,10 @@ function processFrame(now) {
       continue;
     }
 
-    // Occlusion needs no special handling any more. A hand crossing the print
-    // doesn't blank the overlay in one frame and it doesn't snap it somewhere
-    // wrong either — the membership field simply decays where the colour stops
-    // being visible and recovers where it returns, at the rate of params.ema.
-    // MISS_GRACE_FRAMES survives only to keep the media clock honest.
+    // Occlusion needs no special handling. A hand crossing the print doesn't
+    // blank the overlay in one frame, and it can't snap it somewhere wrong
+    // either — the membership field simply decays where the colour stops being
+    // visible and recovers where it returns.
     state.missStreak[pi] = 0;
     state.lastCentroid[pi] = res.centroid;
     state.captionElapsed[pi] += dt;
@@ -110,7 +98,7 @@ startBtn.onclick = async () => {
     const { PW, PH } = await startCamera();
     state.running = true;
     state.lastFrameTime = 0;  // first frame computes dt=0, no startup jump
-    resetGain();
+    resetClusters();
     startBtn.style.display = 'none';
     controlsEl.style.display = 'flex';
     calControls.style.display = 'flex';
