@@ -1,47 +1,40 @@
 // ── main: orchestration + frame loop ──────────────────────────────────────────
 // Entry point. Wires the modules together and runs the per-frame pipeline.
+//
+// The pipeline is now one pass, not three. There is no longer a "blob mode" vs
+// "match mode" vs "fill mode": those were three different answers to "which
+// pixels belong to this colour", and the quantizer answers it once, for every
+// colour simultaneously. What used to be fill mode is now simply the mode.
+//
+//   frame → classify every pixel to its nearest calibrated colour
+//         → per colour: smoothed membership field → RGBA stencil
+//         → per colour: pour that colour's media through the stencil
+//
+// No polygons, no hue rotation, no largest-blob arbitration, no jump gate.
 
-import { PIECES, N, LERP, MISS_GRACE_FRAMES } from './config.js';
+import { N, MISS_GRACE_FRAMES } from './config.js';
 import { state } from './state.js';
-import { matchAndLerp } from './geometry.js';
 import {
   mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls,
   panelToggle, overlayPanel, stereoCanvas,
 } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
-import { computeHSV, detectPiece, detectAllPieces, detectFillMask } from './tracker.js';
-import { resetTheta, getTheta } from './match.js';
-import { drawOverlay, renderDebugBar, drawFillOverlay } from './render.js';
+import { classifyFrame, detectClassStencil } from './tracker.js';
+import { resetGain, getGain } from './quantize.js';
+import { renderDebugBar, drawFillOverlay } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider } from './ui.js';
 import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 import { renderStereoGL } from './stereoGL.js';
 
-// Registration (relative-colour) tracking vs. the original per-piece absolute
-// thresholding. Off by default; enable with ?match=1 in the URL (works on iOS
-// where there's no keyboard) or toggle live with the M key while running. On
-// toggle we drop the session hue-rotation so the new mode re-acquires cleanly.
-let matchMode = new URLSearchParams(location.search).get('match') === '1';
+// The white-point gain is session state (see quantize.js). If you walk into a
+// different room mid-session and the estimate has settled somewhere stale, G
+// drops it and lets it re-acquire from the next frame.
 window.addEventListener('keydown', e => {
-  if (e.key === 'm' || e.key === 'M') {
-    matchMode = !matchMode;
-    resetTheta();
-    statusEl.textContent =
-      'Tracking: ' + (matchMode ? 'relative registration (match)' : 'per-piece thresholds');
-  }
-});
-
-// Colour-fill render mode. Off by default; enable with ?fill=1 or toggle with
-// the F key. When on, each calibrated colour is rendered as media poured into
-// EVERY pixel of that colour (spirals, interlocking regions, holes) instead of
-// one tracked polygon. Detection for the blob/registration paths is untouched —
-// this only swaps what gets drawn — so it can't break existing tracking.
-let fillMode = new URLSearchParams(location.search).get('fill') === '1';
-window.addEventListener('keydown', e => {
-  if (e.key === 'f' || e.key === 'F') {
-    fillMode = !fillMode;
-    statusEl.textContent = 'Render: ' + (fillMode ? 'colour-fill (all regions)' : 'blob polygons');
+  if (e.key === 'g' || e.key === 'G') {
+    resetGain();
+    statusEl.textContent = 'White-point gain reset — re-acquiring';
   }
 });
 
@@ -53,83 +46,43 @@ function processFrame(now) {
 
   const PW = readCanvas.width, PH = readCanvas.height;
   const MW = mainCanvas.width, MH = mainCanvas.height;
-  const scaleX = MW / PW, scaleY = MH / PH;
 
   drawOriented(readCtx, PW, PH);
-  computeHSV(readCtx.getImageData(0, 0, PW, PH).data, PW * PH);
+  const img = readCtx.getImageData(0, 0, PW, PH).data;
 
   if (state.showFeed) drawOriented(mainCtx, MW, MH);
   else { mainCtx.fillStyle = '#fff'; mainCtx.fillRect(0, 0, MW, MH); }
 
+  // One classification pass resolves every calibrated colour at once. The
+  // returned palette maps class index → piece index (calibrated slots may be
+  // sparse, so the two are not the same number).
+  const palette = classifyFrame(img, state.calibrated, PW, PH);
+
   const counts = Array(N).fill(0);
 
-  if (fillMode) {
-    // Colour-fill: media poured into every pixel of each calibrated colour. If
-    // match mode is also on, run the registration pass once purely to keep θ
-    // current, then thread it through detectFillMask so filled colours ride the
-    // same lighting compensation as tracked pieces.
-    let theta = 0;
-    if (matchMode) {
-      detectAllPieces(state.calibrated, PW, PH, state.lastCentroid);
-      theta = getTheta() || 0;
-    }
-    for (let i = 0; i < N; i++) {
-      const cal = state.calibrated[i];
-      if (!cal) continue;
-      const res = detectFillMask(cal, PW, PH, theta);
-      if (!res) continue;
-      state.captionElapsed[i] += dt;
-      counts[i] = res.filled;
-      drawFillOverlay(i, res, PW, PH, MW, MH);
-    }
-  } else {
+  for (let c = 0; c < palette.length; c++) {
+    const pi = palette[c].pi;
+    const res = detectClassStencil(c, PW, PH);
 
-  // In match mode, one segmentation resolves every piece at once; otherwise
-  // each piece runs its own absolute-colour detector. Both yield the same
-  // per-piece { poly, filled, centroid } | null, so the loop below is identical.
-  const batch = matchMode
-    ? detectAllPieces(state.calibrated, PW, PH, state.lastCentroid)
-    : null;
-
-  for (let i = 0; i < N; i++) {
-    const cal = state.calibrated[i];
-    if (!cal) continue;
-
-    const found = batch ? batch[i] : detectPiece(cal, PW, PH, state.lastCentroid[i]);
-
-    if (!found) {
-      state.missStreak[i]++;
-      if (state.missStreak[i] > MISS_GRACE_FRAMES) {
-        state.smoothHulls[i] = null;
-        state.smoothArea[i] = 0;
-        state.lastCentroid[i] = null;
-      } else if (state.smoothHulls[i]) {
-        drawOverlay(state.smoothHulls[i], i, MW, MH);
-      }
+    if (!res) {
+      state.missStreak[pi]++;
+      state.lastCentroid[pi] = null;
       continue;
     }
 
+    // Occlusion needs no special handling any more. A hand crossing the print
+    // doesn't blank the overlay in one frame and it doesn't snap it somewhere
+    // wrong either — the membership field simply decays where the colour stops
+    // being visible and recovers where it returns, at the rate of params.ema.
+    // MISS_GRACE_FRAMES survives only to keep the media clock honest.
+    state.missStreak[pi] = 0;
+    state.lastCentroid[pi] = res.centroid;
+    state.captionElapsed[pi] += dt;
+    counts[pi] = res.filled;
 
-    state.missStreak[i] = 0;
-    state.lastCentroid[i] = found.centroid;
-    state.captionElapsed[i] += dt;
-
-    counts[i] = found.filled;
-    const poly = found.poly.map(p => [p[0] * scaleX, p[1] * scaleY]);
-
-    const prevA = state.smoothArea[i];
-    let lerpThis = LERP;
-    if (state.smoothHulls[i] && prevA > 0) {
-      const ratio = found.filled / prevA;
-      if (ratio < 0.6 || ratio > 1.7) lerpThis = LERP * 0.15;
-    }
-    state.smoothArea[i] = prevA > 0 ? prevA + (found.filled - prevA) * 0.25 : found.filled;
-
-    state.smoothHulls[i] = matchAndLerp(state.smoothHulls[i], poly, lerpThis);
-    drawOverlay(state.smoothHulls[i], i, MW, MH);
+    drawFillOverlay(pi, res, PW, PH, MW, MH);
   }
 
-  }
   renderDebugBar(counts);
 
   if (state.stereo) {
@@ -157,13 +110,14 @@ startBtn.onclick = async () => {
     const { PW, PH } = await startCamera();
     state.running = true;
     state.lastFrameTime = 0;  // first frame computes dt=0, no startup jump
+    resetGain();
     startBtn.style.display = 'none';
     controlsEl.style.display = 'flex';
     calControls.style.display = 'flex';
     panelToggle.style.display = 'block';
     overlayPanel.classList.add('open');
     cvStatusEl.textContent = `Running at ${PW}×${PH} proc res — pure JS`;
-    statusEl.textContent = 'Tip: turn feed off (white), then calibrate by tapping each piece border';
+    statusEl.textContent = 'Fill the frame with the print, then calibrate by tapping each colour';
     buildUI();
     processFrame();
   } catch (e) {

@@ -1,135 +1,62 @@
-// ── tracker: pixels → polygon ─────────────────────────────────────────────────
-// Per-piece detection: calibrated colour → boundary trace → fixed-N polygon.
+// ── tracker: pixels → per-colour stencils ─────────────────────────────────────
+// What used to live here — HSV bands, Moore-neighbour boundary tracing,
+// arc-length resampling, largest-blob selection, the MAX_JUMP hand guard — is
+// all gone. None of it could express the thing we actually need to track: a
+// figure-ground marker whose colours form disconnected, interlocking regions
+// with holes. A polygon fundamentally cannot represent that shape; a raster
+// stencil trivially can.
+//
+// So detection now ends where rendering begins: quantize.js assigns every pixel
+// to its nearest calibrated colour and maintains a smooth 0-1 membership field
+// per colour; this module turns each field into an RGBA stencil that render.js
+// composites media through (destination-in). Every pixel of a colour is
+// preserved — spirals, counters, interlocks and all.
+//
+// The only classical CV left is connected-component labelling, and it's used
+// for exactly one job: throwing away specks. We keep EVERY surviving component,
+// never just the biggest — that's the whole point.
 
-import { params, CLOSE_R, BOUNDARY_N, MAX_JUMP_FRAC } from './config.js';
-import { registerBlobs } from './match.js';
+import { params } from './config.js';
+import {
+  allocQuantBuffers, buildPalette, quantizeFrame, classAlpha, NO_CLASS,
+} from './quantize.js';
 
-let Hc, Sc, Vc;            // per-pixel HSV (Float32: H 0-360, S/V 0-1)
-let maskA, maskB, maskC;   // binary scratch masks (Uint8)
-let labels, labelStack;    // connected-component labels + flood-fill stack
-let fillRGBA;              // proc-res RGBA stencil for colour-fill mode (white+alpha)
+let labels, labelStack;   // connected-component scratch
+let hard;                 // Uint8 thresholded mask, reused per class
+let rgba;                 // shared proc-res RGBA stencil handed to render.js
 
-export function allocBuffers(w, h) {
+export function allocBuffers(w, h, nClasses = 16) {
   const n = w * h;
-  Hc = new Float32Array(n); Sc = new Float32Array(n); Vc = new Float32Array(n);
-  maskA = new Uint8Array(n); maskB = new Uint8Array(n); maskC = new Uint8Array(n);
-  labels = new Int32Array(n); labelStack = new Int32Array(n);
-  fillRGBA = new Uint8ClampedArray(n * 4);
+  labels = new Int32Array(n);
+  labelStack = new Int32Array(n);
+  hard = new Uint8Array(n);
+  rgba = new Uint8ClampedArray(n * 4);
+  allocQuantBuffers(w, h, nClasses);
 }
 
-// RGB→HSV for the whole frame, once.
-export function computeHSV(img, count) {
-  for (let p = 0, q = 0; p < count; p++, q += 4) {
-    const r = img[q] / 255, g = img[q + 1] / 255, b = img[q + 2] / 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
-    let h = 0;
-    if (d > 0) {
-      if      (max === r) h = ((g - b) / d + 6) % 6;
-      else if (max === g) h = (b - r) / d + 2;
-      else                h = (r - g) / d + 4;
-      h *= 60;
-    }
-    Hc[p] = h; Sc[p] = max > 0 ? d / max : 0; Vc[p] = max;
-  }
+// Classify the frame. Call once per frame, before any detectClassStencil.
+// Returns the palette, so the caller can map class index → piece index.
+export function classifyFrame(img, calibrated, w, h) {
+  const palette = buildPalette(calibrated);
+  quantizeFrame(img, palette, w, h);
+  return palette;
 }
 
-function buildMask(cal, count, hueOffset = 0) {
-  const hT = params.htol * 2, sT = params.stol / 255, vT = params.vtol / 255;
-  const calH = cal.h + hueOffset;   // hueOffset lets colour-fill mode apply the
-                                    // registration path's global θ so a filled
-                                    // colour survives lighting shifts too; the
-                                    // per-piece detectPiece path passes 0.
-  // V tolerance is a FLOOR only, not a band. Under blacklight the paint
-  // should be the brightest saturated thing in frame, and its absolute
-  // brightness legitimately drifts more than ambient-light tracking would
-  // (UV intensity falls off with distance/angle, gloss finishes add
-  // hotspots) — rejecting pixels for being "too bright" only ever cost real
-  // detections as a piece moved further from the light source, it never
-  // filtered anything useful.
-  const vFloor = cal.v - vT;
-  for (let p = 0; p < count; p++) {
-    let dh = Math.abs(Hc[p] - calH) % 360; if (dh > 180) dh = 360 - dh;
-    maskA[p] = (dh <= hT && Math.abs(Sc[p] - cal.s) <= sT && Vc[p] >= vFloor) ? 1 : 0;
-  }
-}
-
-// Colour-agnostic "is this a coloured piece" mask for the registration path:
-// any sufficiently saturated, non-black pixel. This is what lets us segment
-// once (pieces vs white ground) and decide *which* piece each blob is later,
-// by relative colour — instead of running one absolute-hue mask per piece.
-// minSat is derived per-config from the palette (see detectAllPieces) so it
-// always sits below the least-saturated calibrated piece; the vFloor just
-// drops near-black. Saturation is far more white-balance-stable than hue, so
-// this segmentation barely cares about the lighting we're trying to survive.
-function buildSatMask(count, minSat) {
-  const vFloor = 0.12;
-  for (let p = 0; p < count; p++) {
-    maskA[p] = (Sc[p] >= minSat && Vc[p] >= vFloor) ? 1 : 0;
-  }
-}
-
-// separable binary morphology: horiz pass into tmp, vert pass into dst.
-// erode = AND over the window, dilate = OR.
-function morphPass(src, dst, tmp, w, h, r, erode) {
-  for (let y = 0; y < h; y++) {
-    const off = y * w;
-    for (let x = 0; x < w; x++) {
-      let acc = erode ? 1 : 0;
-      for (let dx = -r; dx <= r; dx++) {
-        const xx = x + dx, v = (xx < 0 || xx >= w) ? 0 : src[off + xx];
-        if (erode) { if (!v) { acc = 0; break; } } else { if (v) { acc = 1; break; } }
-      }
-      tmp[off + x] = acc;
-    }
-  }
-  for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) {
-      let acc = erode ? 1 : 0;
-      for (let dy = -r; dy <= r; dy++) {
-        const yy = y + dy, v = (yy < 0 || yy >= h) ? 0 : tmp[yy * w + x];
-        if (erode) { if (!v) { acc = 0; break; } } else { if (v) { acc = 1; break; } }
-      }
-      dst[y * w + x] = acc;
-    }
-  }
-}
-
-// close = dilate then erode, in place on maskA (maskB/maskC are scratch)
-function morphClose(w, h, r) {
-  if (r <= 0) return;
-  morphPass(maskA, maskB, maskC, w, h, r, false);
-  morphPass(maskB, maskA, maskC, w, h, r, true);
-}
-
-// Flood-fill label maskA; return EVERY blob at or above minA, each with area,
-// centroid, and a seed pixel for traceBoundary (topmost-leftmost pixel of
-// that label, always on the outer boundary — see the old largestBlob's note,
-// still true per-blob here). Enumerating every candidate, not just the
-// biggest, is what lets chooseBlob() prefer "the blob near where this piece
-// was last seen" over "whatever's biggest right now" — the latter is exactly
-// what let a hand or a stray patch of matching fluorescence hijack tracking.
-function findBlobs(w, h, minA) {
+// Flood-fill `hard`, zeroing every component smaller than minA. 8-connected, so
+// a diagonal hairline in the print (the crossbar of that Y) stays whole instead
+// of fragmenting into rejected specks.
+function rejectSpecks(w, h, minA) {
   const n = w * h;
   labels.fill(0);
   let cur = 0;
-  const blobs = [];
   for (let s = 0; s < n; s++) {
-    if (!maskA[s] || labels[s]) continue;
+    if (!hard[s] || labels[s]) continue;
     cur++;
-    let sp = 0;
+    let sp = 0, head = 0;
     labelStack[sp++] = s; labels[s] = cur;
-    let area = 0, sx = 0, sy = 0;
-    // Circular-mean hue (via sin/cos sums — hue wraps at 360) and mean sat,
-    // accumulated here so the registration path gets each blob's colour for
-    // free in the same pass. The per-piece path ignores these fields.
-    let hSin = 0, hCos = 0, sSum = 0;
-    while (sp > 0) {
-      const idx = labelStack[--sp];
-      area++;
+    while (sp > head) {
+      const idx = labelStack[head++];
       const x = idx % w, y = (idx / w) | 0;
-      sx += x; sy += y;
-      const rad = Hc[idx] * Math.PI / 180;
-      hSin += Math.sin(rad); hCos += Math.cos(rad); sSum += Sc[idx];
       for (let dy = -1; dy <= 1; dy++) {
         const ny = y + dy; if (ny < 0 || ny >= h) continue;
         const nrow = ny * w;
@@ -137,218 +64,55 @@ function findBlobs(w, h, minA) {
           if (dx === 0 && dy === 0) continue;
           const nx = x + dx; if (nx < 0 || nx >= w) continue;
           const nidx = nrow + nx;
-          if (maskA[nidx] && !labels[nidx]) { labels[nidx] = cur; labelStack[sp++] = nidx; }
+          if (hard[nidx] && !labels[nidx]) { labels[nidx] = cur; labelStack[sp++] = nidx; }
         }
       }
     }
-    if (area >= minA) {
-      let mh = Math.atan2(hSin, hCos) * 180 / Math.PI; if (mh < 0) mh += 360;
-      blobs.push({ label: cur, area, cx: sx / area, cy: sy / area, start: s,
-                   meanHue: mh, meanSat: sSum / area });
-    }
+    // labelStack[0..sp) now holds exactly this component's members
+    if (sp < minA) for (let m = 0; m < sp; m++) hard[labelStack[m]] = 0;
   }
-  return blobs;
 }
 
-// Choose which blob is "the piece". With a known previous position
-// (prevCentroid, proc-space [x,y]), prefer the LARGEST blob within
-// MAX_JUMP_FRAC of the frame width from that position, ignoring anything
-// farther away no matter how big — a hand or stray fluorescence winning on
-// size alone doesn't matter if it's nowhere near where the piece actually
-// was. If nothing qualifies nearby, this frame reads as a miss (returns
-// null) rather than snapping to a distant blob; the caller's grace-period
-// logic decides whether that's a brief occlusion or a real loss.
-// With no previous position (first acquisition, or re-acquiring after a real
-// loss), there's nothing to be near, so just take the largest blob overall.
-function chooseBlob(blobs, prevCentroid, w) {
-  if (!blobs.length) return null;
-  if (prevCentroid) {
-    const maxJump = w * MAX_JUMP_FRAC;
-    let best = null;
-    for (const b of blobs) {
-      const d = Math.hypot(b.cx - prevCentroid[0], b.cy - prevCentroid[1]);
-      if (d <= maxJump && (!best || b.area > best.area)) best = b;
-    }
-    return best;
-  }
-  let best = blobs[0];
-  for (const b of blobs) if (b.area > best.area) best = b;
-  return best;
-}
-
-// Moore-neighbor offsets, CCW starting East. Tracing the outer boundary this
-// way naturally skips the hole (it's never labeled, so it's just invisible).
-const MOORE_DX = [ 1, 1, 0,-1,-1,-1, 0, 1];
-const MOORE_DY = [ 0,-1,-1,-1, 0, 1, 1, 1];
-
-function traceBoundary(label, startIdx, w, h) {
-  const pts = [];
-  const maxSteps = w * h * 2;
-  let x = startIdx % w, y = (startIdx / w) | 0, arriveDir = 4;
-  const startX = x, startY = y;
-  for (let step = 0; step < maxSteps; step++) {
-    pts.push([x, y]);
-    const scanStart = (arriveDir + 5) % 8;
-    let found = false;
-    for (let k = 0; k < 8; k++) {
-      const dir = (scanStart + k) % 8;
-      const nx = x + MOORE_DX[dir], ny = y + MOORE_DY[dir];
-      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-      if (labels[ny * w + nx] === label) { x = nx; y = ny; arriveDir = dir; found = true; break; }
-    }
-    if (!found) break;
-    if (x === startX && y === startY && step > 0) break;
-  }
-  return pts;
-}
-
-// Resample the trace to n points, evenly spaced by arc length. The trace always
-// starts at the blob's topmost-leftmost pixel (see findBlobs), so point index
-// is already stable frame to frame without any anchor search — index i means
-// "the same point around the perimeter" every frame, which is what lets the
-// straight per-index lerp in geometry.js's matchAndLerp be correct.
-function resampleByArcLength(trace, n) {
-  const m = trace.length;
-  if (m < 3) return trace.map(p => p.slice());
-
-  const cum = new Float64Array(m + 1);
-  for (let i = 0; i < m; i++) {
-    const a = trace[i], b = trace[(i + 1) % m];
-    cum[i + 1] = cum[i] + Math.hypot(b[0] - a[0], b[1] - a[1]);
-  }
-  const total = cum[m];
-  if (total <= 0) return trace.map(p => p.slice());
-
-  const out = [];
-  let seg = 0;
-  for (let k = 0; k < n; k++) {
-    const target = (total * k) / n;
-    while (seg < m - 1 && cum[seg + 1] < target) seg++;
-    const segLen = cum[seg + 1] - cum[seg];
-    const t = segLen > 0 ? (target - cum[seg]) / segLen : 0;
-    const a = trace[seg], b = trace[(seg + 1) % m];
-    out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-  }
-  return out;
-}
-
-// Full per-piece pipeline. Returns { poly, filled, centroid } or null.
-// computeHSV must have been called for this frame first. `prevCentroid` is
-// this piece's last known proc-space position (or null) — see chooseBlob.
-export function detectPiece(cal, w, h, prevCentroid) {
-  buildMask(cal, w * h);
-  morphClose(w, h, CLOSE_R);
-  const blobs = findBlobs(w, h, params.minArea);
-  const blob = chooseBlob(blobs, prevCentroid, w);
-  if (!blob) return null;
-
-  const trace = traceBoundary(blob.label, blob.start, w, h);
-  if (trace.length < 3) return null;
-
-  const poly = resampleByArcLength(trace, BOUNDARY_N);
-  return { poly, filled: blob.area, centroid: [blob.cx, blob.cy] };
-}
-
-// ── registration path: all pieces from one segmentation ───────────────────────
-// Alternative to the per-piece detectPiece loop. Segments every coloured blob
-// once (sat-only), reads each blob's mean colour, then asks match.js which
-// blob is which piece by fitting the stored palette onto what's actually in
-// frame via a single global hue rotation. Returns an array indexed like
-// state.calibrated: each entry is { poly, filled, centroid } (same shape
-// detectPiece returns) for a matched piece, or null for a null/unmatched one —
-// so main.js's existing smoothing / miss-grace / overlay loop is unchanged.
-// computeHSV must have been called for this frame first. prevCentroids is the
-// per-piece last-known position array (state.lastCentroid), used as a soft
-// tiebreak inside match.js.
-export function detectAllPieces(calibrated, w, h, prevCentroids) {
-  const out = Array(calibrated.length).fill(null);
-
-  // Build the active palette from non-null calibrated pieces, and find the
-  // least-saturated one so the segmentation threshold sits safely below it.
-  const palette = [];
-  let minSat = 1;
-  for (let i = 0; i < calibrated.length; i++) {
-    const c = calibrated[i];
-    if (!c) continue;
-    palette.push({ pi: i, h: c.h, s: c.s, prevCentroid: prevCentroids[i] || null });
-    if (c.s < minSat) minSat = c.s;
-  }
-  if (!palette.length) return out;
-
-  // Segment: half the least-saturated palette entry, clamped to a sane band, so
-  // the mask captures every piece but not the near-grey white ground.
-  const segSat = Math.max(0.12, Math.min(0.30, minSat * 0.5));
-  buildSatMask(w * h, segSat);
-  morphClose(w, h, CLOSE_R);
-
-  const blobs = findBlobs(w, h, params.minArea);
-  if (!blobs.length) return out;
-
-  const observed = blobs.map((b, oi) => ({
-    oi, hue: b.meanHue, sat: b.meanSat,
-    cx: b.cx, cy: b.cy, area: b.area, label: b.label, start: b.start,
-  }));
-
-  const matches = registerBlobs(palette, observed, w);
-
-  for (const p of palette) {
-    const blob = matches.get(p.pi);
-    if (!blob) continue;
-    const trace = traceBoundary(blob.label, blob.start, w, h);
-    if (trace.length < 3) continue;
-    out[p.pi] = {
-      poly: resampleByArcLength(trace, BOUNDARY_N),
-      filled: blob.area,
-      centroid: [blob.cx, blob.cy],
-    };
-  }
-  return out;
-}
-
-// ── colour-fill path: every region of a colour → one stencil ──────────────────
-// A different *rendering* target than the blob path. Instead of reducing a
-// colour to one traced polygon (which can't express a spiral, holes, or
-// disconnected regions), this keeps the whole colour mask and hands it back as
-// a proc-res RGBA stencil (opaque white where the colour is, transparent
-// elsewhere) for render.js to composite media through (destination-in). So
-// "all the red", however tangled, gets the media mapped onto it.
+// One colour → one stencil. `c` is a palette index (from classifyFrame).
+// Returns { rgba, w, h, bx, by, bw, bh, filled, centroid } — the exact shape
+// render.js's drawFillOverlay already consumes, plus a centroid for main.js's
+// miss/grace bookkeeping. Null if the colour isn't meaningfully present.
 //
-// Speck rejection: we still connected-component the mask and keep only blobs
-// ≥ minArea, so sensor-noise dots don't flash media — but we keep EVERY
-// surviving component, not just the biggest, which is the whole point.
-// hueOffset threads the registration θ through (0 when match mode is off) so a
-// filled colour is as lighting-robust as a tracked one.
-//
-// Returns { rgba, w, h, bx, by, bw, bh, filled } (bbox in proc px) or null if
-// nothing survives. rgba is a shared buffer — consume it before the next call.
-export function detectFillMask(cal, w, h, hueOffset = 0) {
-  const count = w * h;
-  buildMask(cal, count, hueOffset);
-  morphClose(w, h, CLOSE_R);
+// The stencil's alpha is the SMOOTHED membership field, not a hard 0/255 mask.
+// That's what gives soft edges where one printed ink meets another, and what
+// stops boundary pixels from strobing under sensor noise. The connected-
+// component pass only gates WHICH pixels may appear — it never quantises their
+// alpha.
+export function detectClassStencil(c, w, h) {
+  const n = w * h;
+  const field = classAlpha(c);
+  if (!field) return null;
 
-  const blobs = findBlobs(w, h, params.minArea);   // labels[] now filled
-  if (!blobs.length) return null;
+  // hard mask for component analysis: "this pixel is more this colour than not"
+  for (let p = 0; p < n; p++) hard[p] = field[p] > 0.5 ? 1 : 0;
+  rejectSpecks(w, h, params.minArea);
 
-  let maxLabel = 0;
-  for (const b of blobs) if (b.label > maxLabel) maxLabel = b.label;
-  const keep = new Uint8Array(maxLabel + 1);
-  for (const b of blobs) keep[b.label] = 1;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  let filled = 0, sx = 0, sy = 0;
 
-  let minX = w, minY = h, maxX = -1, maxY = -1, filled = 0;
-  for (let p = 0, q = 0; p < count; p++, q += 4) {
-    const lbl = labels[p];
-    if (lbl > 0 && lbl <= maxLabel && keep[lbl]) {
-      fillRGBA[q] = 255; fillRGBA[q + 1] = 255; fillRGBA[q + 2] = 255; fillRGBA[q + 3] = 255;
-      const x = p % w, y = (p / w) | 0;
-      if (x < minX) minX = x; if (x > maxX) maxX = x;
-      if (y < minY) minY = y; if (y > maxY) maxY = y;
-      filled++;
-    } else {
-      fillRGBA[q + 3] = 0;
-    }
+  for (let p = 0, q = 0; p < n; p++, q += 4) {
+    if (!hard[p]) { rgba[q + 3] = 0; continue; }
+    rgba[q] = 255; rgba[q + 1] = 255; rgba[q + 2] = 255;
+    rgba[q + 3] = Math.round(Math.min(1, field[p]) * 255);
+    const x = p % w, y = (p / w) | 0;
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    sx += x; sy += y; filled++;
   }
-  if (filled === 0) return null;
 
-  return { rgba: fillRGBA, w, h,
-           bx: minX, by: minY, bw: maxX - minX + 1, bh: maxY - minY + 1, filled };
+  if (filled < params.minArea) return null;
+
+  return {
+    rgba, w, h,
+    bx: minX, by: minY, bw: maxX - minX + 1, bh: maxY - minY + 1,
+    filled,
+    centroid: [sx / filled, sy / filled],
+  };
 }
+
+export { NO_CLASS };

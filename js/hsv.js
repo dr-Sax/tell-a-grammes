@@ -1,6 +1,8 @@
 // ── colour helpers ────────────────────────────────────────────────────────────
-// Single-pixel conversions. The hot per-frame RGB→HSV pass is hand-inlined in
-// tracker.js (computeHSV) to avoid per-pixel array allocation.
+// Detection no longer runs in HSV — quantize.js classifies in RGB. These remain
+// because the UI still speaks HSV: swatches, the calibration readout, and the
+// H/S stats line in the piece list. rgb2hsv is also how calibrate.js derives the
+// display fields from the RGB it now actually stores.
 
 // RGB→HSV. Returns [h 0-360, s 0-1, v 0-1].
 export function rgb2hsv(r, g, b) {
@@ -16,13 +18,29 @@ export function rgb2hsv(r, g, b) {
   return [h, max > 0 ? d / max : 0, max];
 }
 
-// HSV→#rrggbb.
-export function hsvToHex(h, s, v) {
+// HSV→[r,g,b] 0-255. Used to migrate configs saved before the RGB refactor:
+// they only carry h/s/v, so we reconstruct an RGB reference from them. Lossy at
+// the margins, but it's a starting point, and one re-tap replaces it with a
+// true sampled value.
+export function hsv2rgb(h, s, v) {
   const f = n => {
     const k = (n + h / 60) % 6;
     return Math.round((v - v * s * Math.max(0, Math.min(k, 4 - k, 1))) * 255);
   };
-  return '#' + [f(5), f(3), f(1)].map(x => x.toString(16).padStart(2, '0')).join('');
+  return [f(5), f(3), f(1)];
+}
+
+// HSV→#rrggbb.
+export function hsvToHex(h, s, v) {
+  const [r, g, b] = hsv2rgb(h, s, v);
+  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// RGB→#rrggbb.
+export function rgbToHex(r, g, b) {
+  return '#' + [r, g, b]
+    .map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0'))
+    .join('');
 }
 
 // Circular hue distance in degrees (0-180).

@@ -6,7 +6,7 @@
 
 import { PIECES, N, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
-import { hsvToHex, hueDiff360 } from './hsv.js';
+import { hsvToHex, rgbToHex } from './hsv.js';
 import {
   tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $,
   mainCanvas, stereoCanvas, canvasWrap, stereoControlsEl, statusEl
@@ -111,14 +111,19 @@ export function wireStereoSlider() {
   );
 }
 
-function conflictsWith(i) {
-  const cal = state.calibrated[i];
-  if (!cal) return null;
-  for (let j = 0; j < N; j++) {
-    if (j === i || !state.calibrated[j]) continue;
-    if (hueDiff360(cal.h, state.calibrated[j].h) < params.htol * 2) return j;
-  }
-  return null;
+// The old conflictsWith() warned when two pieces had similar hues, because the
+// per-piece hue bands would then overlap and both claim the same pixels. Under
+// nearest-colour classification that is no longer a fault condition — it's the
+// headline feature. Two blues 15° apart are simply two palette entries, and the
+// classifier puts the boundary exactly between them. The warning is gone.
+
+// Swatch colour: the calibrated RGB itself where we have it (which is now the
+// literal thing being matched against), falling back to the HSV fields for
+// configs saved before the RGB refactor.
+function swatchColor(cal, fallback) {
+  if (!cal) return fallback;
+  if (Number.isFinite(cal.r)) return rgbToHex(cal.r, cal.g, cal.b);
+  return hsvToHex(cal.h, cal.s, cal.v);
 }
 
 export function buildUI() {
@@ -134,22 +139,18 @@ export function buildUI() {
 
     const sw = document.createElement('div');
     sw.className = 'swatch';
-    sw.style.background = cal ? hsvToHex(cal.h, cal.s, cal.v) : p.color;
+    sw.style.background = swatchColor(cal, p.color);
     sw.style.opacity = cal ? '1' : '0.35';
 
     const lbl = document.createElement('span');
     lbl.className = 'piece-label';
     lbl.textContent = p.name;
-    const conflict = conflictsWith(i);
-    if (conflict !== null) {
-      const dist = Math.round(hueDiff360(cal.h, state.calibrated[conflict].h));
-      lbl.textContent += ` ⚠ ~${dist}°`;
-      lbl.style.color = '#c84';
-    }
 
     const stats = document.createElement('span');
     stats.className = 'piece-stats';
-    stats.textContent = cal ? `H${Math.round(cal.h)}° S${cal.s.toFixed(2)}` : '—';
+    stats.textContent = cal && Number.isFinite(cal.r)
+      ? `${cal.r},${cal.g},${cal.b}`
+      : (cal ? `H${Math.round(cal.h)}°` : '—');
 
     const calBtn = document.createElement('button');
     calBtn.className = 'cal-btn' +
@@ -161,7 +162,7 @@ export function buildUI() {
       const on = state.calibrating >= 0;
       tapHint.style.display   = on ? 'block' : 'none';
       crosshair.style.display = on ? 'block' : 'none';
-      tapHint.textContent = on ? `Tap the colored BORDER of ${PIECES[state.calibrating].name}` : '';
+      tapHint.textContent = on ? `Tap a region of ${PIECES[state.calibrating].name}` : '';
       // collapse the panel out of the way while actively calibrating — the
       // piece needs to be fully visible to tap; reopen it if the button is
       // pressed again to cancel (calibrateAt reopens it on a successful tap).

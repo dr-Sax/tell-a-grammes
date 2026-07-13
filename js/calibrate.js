@@ -1,7 +1,23 @@
 // ── calibrate: tap-to-sample colour calibration + hover readout ───────────────
-// Everything about turning a screen tap into a piece's calibrated H/S/V lives
-// here. Persisting that data (save/load/export) is a separate concern — see
-// configIO.js.
+// A tap now stores an RGB reference triple. That is the whole calibration —
+// detection compares pixels to these triples directly (quantize.js), so what
+// you sample IS what you match against, with no tolerance bands to tune.
+//
+// Two changes from the HSV era worth calling out:
+//
+//   MEDIAN, not mean. Print has specular hotspots and the camera has noise; a
+//   mean drags the reference toward whichever glare pixel was brightest. The
+//   per-channel median just ignores it. (The old circular-hue mean solved a
+//   problem — the 0°/360° seam — that simply doesn't exist in RGB.)
+//
+//   NO saturation/brightness filter. The old code discarded pixels with
+//   s < 0.2 or v < 0.15 to strip the white lightbox out of a border sample.
+//   That filter would now reject the two things we most want to calibrate:
+//   white and black. Every pixel in the patch votes.
+//
+// h/s/v are still written onto the record, purely so the UI (swatches, the
+// piece-list stats line) keeps working unchanged. They are DERIVED. Nothing in
+// the detection path reads them.
 
 import { PIECES } from './config.js';
 import { state } from './state.js';
@@ -10,6 +26,12 @@ import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel, clientToCanvasP
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
 import { pieceMedia } from './media.js';
 import { buildUI } from './ui.js';
+
+function medianOf(arr, n) {
+  const s = arr.slice(0, n).sort((a, b) => a - b);
+  const m = n >> 1;
+  return n % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
 
 function calibrateAt(clientX, clientY) {
   if (state.calibrating < 0 || !state.running) return;
@@ -24,34 +46,23 @@ function calibrateAt(clientX, clientY) {
   if (w <= 0 || h <= 0) { statusEl.textContent = 'Tap inside the frame'; return; }
   const data = readCtx.getImageData(x0, y0, w, h).data;
 
-  // average only saturated/bright pixels — discards the white lightbox and the
-  // dark hole, leaving the border colour. Calibrate with the feed off (white).
-  //
-  // Hue is circular (0-360 wraps), so a plain arithmetic mean is wrong for any
-  // colour near the 0°/360° seam — e.g. samples at 355° and 5° should average
-  // to ~0°, but hs/n would give ~180°. Average via sin/cos (circular mean)
-  // instead. This matters a lot for warm/red-magenta paints (like a ~343°
-  // orange), which sit right next to that seam.
-  let sinSum = 0, cosSum = 0, ss = 0, vs = 0, n = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const [hh, s, v] = rgb2hsv(data[i], data[i + 1], data[i + 2]);
-    if (s > 0.2 && v > 0.15) {
-      const rad = hh * Math.PI / 180;
-      sinSum += Math.sin(rad); cosSum += Math.cos(rad);
-      ss += s; vs += v; n++;
-    }
+  const n = w * h;
+  const rs = new Uint8Array(n), gs = new Uint8Array(n), bs = new Uint8Array(n);
+  for (let i = 0, q = 0; i < n; i++, q += 4) {
+    rs[i] = data[q]; gs[i] = data[q + 1]; bs[i] = data[q + 2];
   }
-  if (n < 4) { statusEl.textContent = 'Tap missed — too dark or unsaturated, try again'; return; }
+  if (n < 4) { statusEl.textContent = 'Tap missed — try again'; return; }
 
-  let meanH = Math.atan2(sinSum, cosSum) * 180 / Math.PI;
-  if (meanH < 0) meanH += 360;
-  const cal = { h: meanH, s: ss / n, v: vs / n };
+  const R = medianOf(rs, n), G = medianOf(gs, n), B = medianOf(bs, n);
+  const [hh, ss, vv] = rgb2hsv(R, G, B);
+
+  const cal = { r: R, g: G, b: B, h: hh, s: ss, v: vv };
   state.calibrated[state.calibrating] = cal;
   state.smoothHulls[state.calibrating] = null;
   state.lastCentroid[state.calibrating] = null;
   state.missStreak[state.calibrating] = 0;
   statusEl.textContent =
-    `${PIECES[state.calibrating].name} → H=${Math.round(cal.h)}° S=${cal.s.toFixed(2)} V=${cal.v.toFixed(2)}`;
+    `${PIECES[state.calibrating].name} → RGB(${R}, ${G}, ${B})`;
   state.calibrating = -1;
   tapHint.style.display = 'none';
   crosshair.style.display = 'none';
@@ -67,12 +78,8 @@ function keepCameraLive() {
 }
 
 // Small floating readout that tracks the crosshair while calibrating, so you
-// can see live H/S/V under the cursor before you tap — useful for checking
-// whether a piece's colour is stable across the surface (gloss hotspots will
-// show up as the reading jumping around as you move) and for sanity-checking
-// paints before committing to a tap. Built here rather than in index.html so
-// no markup changes are needed; sampled straight from readCtx, which the main
-// loop is already redrawing every frame — this adds no extra camera reads.
+// can see the live colour under the cursor before you tap. Now shows RGB (what
+// is actually stored and matched) rather than HSV.
 let readout = null;
 function ensureReadout() {
   if (readout) return readout;
@@ -93,8 +100,7 @@ function updateReadout(clientX, clientY) {
     return;
   }
   const d = readCtx.getImageData(px, py, 1, 1).data;
-  const [hh, s, v] = rgb2hsv(d[0], d[1], d[2]);
-  el.textContent = `H${Math.round(hh)}° S${s.toFixed(2)} V${v.toFixed(2)}`;
+  el.textContent = `R${d[0]} G${d[1]} B${d[2]}`;
   el.style.left = clientX + 'px';
   el.style.top  = clientY + 'px';
   el.style.display = 'block';

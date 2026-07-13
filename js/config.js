@@ -2,18 +2,19 @@
 // Static configuration + live tuning knobs. Everything here is "the dials";
 // per-frame runtime state lives in state.js.
 
-// One entry per physical tangram piece. `shape` is currently unused by
-// detection (boundary tracing doesn't need a corner count) but is kept around
-// in case it's useful later for per-piece cosmetics or future shape-aware
-// features (e.g. same-color piece merging).
+// One entry per calibrated colour. Not "pieces" in the tangram sense any more —
+// with the print-based markers, a single sheet may carry several colours, and
+// each colour is an independent clip region that its own media pours through.
+// The names are just labels for the UI list.
 export const PIECES = [
-  { name: 'Piece 1', color: '#e05555', shape: 'triangle' },
-  { name: 'Piece 2', color: '#e09055', shape: 'triangle' },
-  { name: 'Piece 3', color: '#d4c820', shape: 'triangle' },
-  { name: 'Piece 4', color: '#44b844', shape: 'triangle' },
-  { name: 'Piece 5', color: '#2299cc', shape: 'triangle' },
-  { name: 'Piece 6', color: '#7755dd', shape: 'square' },
-  { name: 'Piece 7', color: '#cc44aa', shape: 'parallelogram' },
+  { name: 'Colour 1', color: '#e05555' },
+  { name: 'Colour 2', color: '#e09055' },
+  { name: 'Colour 3', color: '#d4c820' },
+  { name: 'Colour 4', color: '#44b844' },
+  { name: 'Colour 5', color: '#2299cc' },
+  { name: 'Colour 6', color: '#7755dd' },
+  { name: 'Colour 7', color: '#cc44aa' },
+  { name: 'Colour 8', color: '#ffffff' },
 ];
 
 export const N = PIECES.length;
@@ -21,7 +22,7 @@ export const N = PIECES.length;
 // Per-piece media framing sliders. Values live in state.mediaAdjust[i] and are
 // applied at draw time in render.js / caption.js. zoom multiplies the cover-fit
 // scale; xshift/yshift offset the media centre as a fraction of the tracked
-// piece's bbox (so framing stays anchored as the piece moves and resizes).
+// colour's bbox (so framing stays anchored as the print moves and resizes).
 export const MEDIA_SLIDERS = [
   { key: 'zoom',   label: 'zoom', min: 0.2,   max: 5,   step: 0.05, def: 1 },
   { key: 'rotate', label: 'rot',  min: -180,  max: 180, step: 0.02, def: 0 },
@@ -29,57 +30,60 @@ export const MEDIA_SLIDERS = [
   { key: 'yshift', label: 'y',    min: -1,    max: 1,   step: 0.02, def: 0 },
 ];
 
-// Number of points in the resampled boundary polygon for every piece,
-// regardless of shape. Evenly spaced by arc length around the traced outer
-// perimeter. Higher = smoother outline / more clip-path detail, at a small
-// per-frame cost (resampling + lerp + clip-path drawing all scale with this).
-// 48-64 is plenty for tangram-piece-sized overlays; rarely worth going past
-// 100 since the visual smoothness gain flattens out well before then.
-export const BOUNDARY_N = 64;
-
-// Hull-vertex smoothing factor (lerp toward the new shape each frame).
-export const LERP = 0.3;
-
 // Tracking runs at ~this width regardless of capture resolution, decoupling
 // display sharpness from detection cost.
 export const PROC_TARGET_W = 320;
 
-// Morphology radius. Bordered pieces get NO opening (it erodes thin rings); we
-// only close, to bridge small gaps in the ring (glare / anti-aliasing).
-export const CLOSE_R = 2;
-
-// How far (as a fraction of the proc-frame width) a piece's blob is allowed
-// to jump between frames while continuously tracked, before detectPiece
-// treats "something matched over there" as a miss rather than snapping to
-// it. This is the main defense against a hand — or a stray patch of similar
-// fluorescence — hijacking a piece's tracking just by being the bigger blob
-// this frame. Physical pieces don't teleport, so anything far from the last
-// known position is ignored until re-acquired after MISS_GRACE_FRAMES.
-export const MAX_JUMP_FRAC = 0.35;
-
-// Consecutive missed frames tolerated before a piece's overlay is cleared and
-// its last-known position forgotten (triggering a fresh largest-blob
-// re-acquisition next time something is found). This grace period is what
-// stops a hand briefly passing over a piece from flickering its overlay off.
+// Consecutive missed frames tolerated before a colour's overlay is cleared.
+// Still useful: a hand crossing the print shouldn't flicker the media off.
 export const MISS_GRACE_FRAMES = 8;
 
 // Live tuning, mutated by the sliders. Kept as one object so every module sees
 // edits through the same reference.
+//
+// htol / stol / vtol are GONE. They described three independent tolerance bands
+// around one absolute colour — a model that cannot express "this pixel is more
+// like blue-A than blue-B", which is the only question that matters now. The
+// four dials that replace them:
 export const params = {
-  htol: 12,     // hue tolerance in OpenCV 0-180 units (×2 = degrees)
-  stol: 33,    // saturation tolerance on 0-255 (÷255 = fraction)
-  vtol:75,    // value tolerance on 0-255 (÷255 = fraction)
-  minArea: 20, // min connected-component area in proc px (a ring is small)
+  // Weight of brightness relative to chroma in the nearest-colour distance.
+  //   1.0 ≈ plain RGB distance — brightness counts fully.
+  //   0.0  = chroma only — shading-proof, but light-blue and dark-blue MERGE
+  //          and white/grey/black become indistinguishable from each other.
+  // For printed markers under steady light, brightness is a SIGNAL, not noise:
+  // it's the only axis separating the two Ey Es blues, and the only axis that
+  // exists at all for white vs. black. Hence the high default. Wind it down if
+  // you ever shoot under raking light and see shadowed areas defect to a darker
+  // palette entry.
+  lumaW: 1.0,
+
+  // Soft-membership ramp, in colour-distance units. A pixel gets full alpha
+  // when its winning colour beats the runner-up by this much; below that it
+  // fades. Larger = softer, more forgiving edges (and more rejection of
+  // genuinely ambiguous pixels); smaller = crisper, more decisive edges.
+  soft: 14,
+
+  // Reject distance. If the nearest palette colour is still this far away, the
+  // pixel belongs to nothing (a hand, a shadow, something off-sheet). Generous
+  // by default because with a full-frame print almost everything IS a colour.
+  reject: 110,
+
+  // Temporal EMA on the per-colour membership fields. Lower = smoother/laggier
+  // edges; 1.0 = no smoothing at all (and visible boundary shimmer).
+  ema: 0.35,
+
+  // Minimum connected-component area, in proc px. Kills sensor-noise specks
+  // without touching the real regions. Every component above this survives.
+  minArea: 40,
 };
 
-// Detection-tolerance sliders (the top row of #controls). `def` here is the
-// single source of truth for these defaults — ui.js generates the slider
-// markup from this array, so index.html no longer hardcodes min/max/value
-// attributes that could silently drift out of sync with `params` above (as
-// they previously did).
+// Detection-tolerance sliders (the top row of #controls). ui.js generates the
+// slider markup from this array, so min/max/step/default live in exactly one
+// place.
 export const TOL_SLIDERS = [
-  { key: 'htol',    label: 'Hue tol',  min: 4,  max: 45,   step: 1,  def: params.htol },
-  { key: 'stol',    label: 'Sat tol',  min: 10, max: 120,  step: 1,  def: params.stol },
-  { key: 'vtol',    label: 'Val tol',  min: 10, max: 150,  step: 1,  def: params.vtol },
-  { key: 'minArea', label: 'Min area', min: 20, max: 3000, step: 10, def: params.minArea },
+  { key: 'lumaW',   label: 'Luma wt',  min: 0,  max: 2,    step: 0.05, def: params.lumaW },
+  { key: 'soft',    label: 'Softness', min: 2,  max: 40,   step: 1,    def: params.soft },
+  { key: 'reject',  label: 'Reject',   min: 30, max: 200,  step: 5,    def: params.reject },
+  { key: 'ema',     label: 'Smooth',   min: 0.05, max: 1,  step: 0.05, def: params.ema },
+  { key: 'minArea', label: 'Min area', min: 0,  max: 2000, step: 10,   def: params.minArea },
 ];
