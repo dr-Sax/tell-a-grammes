@@ -26,6 +26,7 @@ import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 import { renderStereoGL } from './stereoGL.js';
+import { pieceMedia } from './media.js';
 
 function processFrame(now) {
   if (!state.running) return;
@@ -67,6 +68,25 @@ function processFrame(now) {
     state.lastCentroid[pi] = res.centroid;
     state.captionElapsed[pi] += dt;
     counts[pi] = res.filled;
+
+    // A calibrated colour with no media is a BACKGROUND class: tracked, but not
+    // drawn. This is not a cosmetic nicety — it's structural, and it's what
+    // makes the whole classifier work.
+    //
+    // Nearest-colour assignment partitions ALL of colour space among the
+    // calibrated entries. There is no "none of the above". Calibrate only two
+    // blues and every pixel in the room — paper, skin, shadow — is handed to
+    // whichever blue it happens to sit closer to, because it has nowhere else
+    // to go. (White paper is ΔE 17 from a light blue. It doesn't stand a
+    // chance.) Worse, k-means then drags that blue's centre toward the paper,
+    // since the paper outnumbers the ink by an order of magnitude, and the class
+    // permanently comes to mean "pale".
+    //
+    // The cure is to give those colours somewhere to go: tap the paper white,
+    // tap the black, and attach no media to them. They then compete for their
+    // own pixels, the ink centres stay on the ink, and nothing is drawn for
+    // them. Every colour in frame needs an entry — that's the rule.
+    if (!pieceMedia[pi]) continue;
 
     drawFillOverlay(pi, res, PW, PH, MW, MH);
   }
