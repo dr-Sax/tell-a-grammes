@@ -8,18 +8,7 @@ export const state = {
   running: false,
   calibrating: -1,                  // piece index being calibrated, or -1
   calibrated: Array(N).fill(null),  // per piece: { h:0-360, s:0-1, v:0-1 }
-  smoothHulls: Array(N).fill(null), // smoothed polygon per piece, canvas px
-  smoothArea: Array(N).fill(0),     // running mean filled area, proc px
 
-  // Tracking continuity. lastCentroid is each piece's last known blob centre
-  // (proc-space [x,y], or null if not currently tracked) — detectPiece uses
-  // this to prefer "the blob near here" over "the biggest blob anywhere",
-  // which is what stops a hand or stray fluorescence from stealing tracking.
-  // missStreak counts consecutive frames a tracked piece went undetected; a
-  // short streak just holds the last overlay in place (a hand passing over),
-  // a long one clears lastCentroid so the next hit re-acquires from scratch.
-  lastCentroid: Array(N).fill(null),
-  missStreak: Array(N).fill(0),
 
   // Per-piece caption clock. This is "elapsed seconds while this piece was
   // detected" — it advances only on frames where the piece is found, and is

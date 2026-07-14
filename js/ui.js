@@ -4,7 +4,7 @@
 // calibrate.js; save/load in configIO.js; per-piece media/framing controls in
 // ui-media.js.
 
-import { PIECES, N, params, TOL_SLIDERS } from './config.js';
+import { PIECES, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
 import { hsvToHex, rgbToHex } from './hsv.js';
 import {
@@ -177,9 +177,6 @@ export function buildUI() {
     clrBtn.disabled = !cal;
     clrBtn.onclick = () => {
       state.calibrated[i] = null;
-      state.smoothHulls[i] = null;
-      state.lastCentroid[i] = null;
-      state.missStreak[i] = 0;
       buildUI();
     };
 

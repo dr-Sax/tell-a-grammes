@@ -18,7 +18,7 @@
 
 import { params } from './config.js';
 import {
-  allocQuantBuffers, buildPalette, quantizeFrame, classAlpha, NO_CLASS,
+  allocQuantBuffers, buildPalette, quantizeFrame, classAlpha, pixelClasses, NO_CLASS,
 } from './quantize.js';
 
 let labels, labelStack;   // connected-component scratch
@@ -36,10 +36,23 @@ export function allocBuffers(w, h, nClasses = 16) {
 
 // Classify the frame. Call once per frame, before any detectClassStencil.
 // Returns the palette, so the caller can map class index → piece index.
+let lastPalette = [];
 export function classifyFrame(img, calibrated, w, h) {
-  const palette = buildPalette(calibrated);
-  quantizeFrame(img, palette, w, h);
-  return palette;
+  lastPalette = buildPalette(calibrated);
+  quantizeFrame(img, lastPalette, w, h);
+  return lastPalette;
+}
+
+// Which piece owns the pixel at proc-space index `p`, or -1. This is the whole
+// of hit-testing now: the classifier already knows who owns every pixel, so
+// asking it is both simpler and more faithful than reconstructing a polygon and
+// ray-casting into it.
+export function pieceAtPixel(p) {
+  const cls = pixelClasses();
+  if (!cls || p < 0 || p >= cls.length) return -1;
+  const c = cls[p];
+  if (c === NO_CLASS || c >= lastPalette.length) return -1;
+  return lastPalette[c].pi;
 }
 
 // Flood-fill `hard`, zeroing every component smaller than minA. 8-connected, so

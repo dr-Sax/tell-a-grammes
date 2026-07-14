@@ -31,8 +31,6 @@ export const MEDIA_SLIDERS = [
 // display sharpness from detection cost.
 export const PROC_TARGET_W = 320;
 
-// Consecutive missed frames tolerated before a colour's overlay is cleared.
-export const MISS_GRACE_FRAMES = 8;
 
 // Live tuning, mutated by the sliders.
 //

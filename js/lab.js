@@ -66,10 +66,10 @@ export function dE2(L1, a1, b1, L2, a2, b2) {
 // below the separation between any two inks you'd print. The table is 393 KB
 // and is built in a few milliseconds at startup.
 
-export const BITS = 5;
-export const LEVELS = 1 << BITS;                  // 32
+const BITS = 5;
+const LEVELS = 1 << BITS;                  // 32
 export const CUBE = LEVELS * LEVELS * LEVELS;     // 32768
-export const SHIFT = 8 - BITS;                    // 3
+const SHIFT = 8 - BITS;                    // 3
 
 // Flat [L,a,b, L,a,b, …] for every cube cell. Index a cell with cubeIndex().
 export const labCube = new Float32Array(CUBE * 3);

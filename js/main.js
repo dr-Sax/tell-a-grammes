@@ -11,7 +11,7 @@
 //
 // No polygons, no hue rotation, no largest-blob arbitration, no jump gate.
 
-import { N, MISS_GRACE_FRAMES } from './config.js';
+import { N } from './config.js';
 import { state } from './state.js';
 import {
   mainCanvas, mainCtx, statusEl, cvStatusEl, startBtn, controlsEl, calControls,
@@ -54,18 +54,12 @@ function processFrame(now) {
     const pi = palette[c].pi;
     const res = detectClassStencil(c, PW, PH);
 
-    if (!res) {
-      state.missStreak[pi]++;
-      state.lastCentroid[pi] = null;
-      continue;
-    }
+    if (!res) continue;
 
-    // Occlusion needs no special handling. A hand crossing the print doesn't
-    // blank the overlay in one frame, and it can't snap it somewhere wrong
-    // either — the membership field simply decays where the colour stops being
-    // visible and recovers where it returns.
-    state.missStreak[pi] = 0;
-    state.lastCentroid[pi] = res.centroid;
+    // Occlusion needs no special handling — no miss counter, no grace period, no
+    // last-known-position. A hand crossing the print doesn't blank the overlay in
+    // one frame and can't snap it somewhere wrong: the membership field simply
+    // decays where the colour stops being visible and recovers where it returns.
     state.captionElapsed[pi] += dt;
     counts[pi] = res.filled;
 

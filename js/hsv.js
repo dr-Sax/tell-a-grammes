@@ -42,9 +42,3 @@ export function rgbToHex(r, g, b) {
     .map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0'))
     .join('');
 }
-
-// Circular hue distance in degrees (0-180).
-export function hueDiff360(a, b) {
-  const d = Math.abs(a - b) % 360;
-  return d > 180 ? 360 - d : d;
-}

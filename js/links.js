@@ -1,37 +1,33 @@
 // ── media links: tap-to-open per-piece URLs ────────────────────────────────────
-// If a piece's media has a `link` set (independent of the media asset's own
-// URL — see configIO.js's getCalData/applyCalData, and the ↗ link button
-// in ui.js), tapping/clicking that piece's rendered overlay opens it in a new
-// tab. Hit-testing uses the same smoothed hulls render.js draws from, so
-// "tap the piece" means the same thing here as it visually looks like.
+// If a colour's media has a `link` set (independent of the asset's own URL —
+// see configIO.js and the ↗ button in ui-media.js), tapping that colour's
+// rendered region opens it in a new tab.
+//
+// Hit-testing used to ray-cast against state.smoothHulls. Those polygons stopped
+// existing when detection went raster, and nothing had populated them since — so
+// this feature had been silently dead. It now asks the classifier directly: which
+// colour owns the pixel under your finger? That's simpler than a polygon test and
+// strictly more accurate, because it hit-tests the region actually being drawn,
+// holes and counters and all — a tap in the middle of a letter's counter no longer
+// registers as a hit on the letter.
 
 import { state } from './state.js';
-import { N } from './config.js';
 import { mainCanvas, clientToCanvasPoint } from './dom.js';
+import { readCanvas } from './camera.js';
+import { pieceAtPixel } from './tracker.js';
 import { pieceMedia } from './media.js';
-import { pointInPolygon } from './geometry.js';
 
-// Which piece (if any) contains this canvas-space point. Checked in reverse
-// draw order — later-index pieces are drawn on top in main.js's loop, so on
-// the rare occasion two pieces' hulls overlap on screen, the visually topmost
-// one should be the one that "catches" the tap.
-function hitPiece(x, y) {
-  for (let i = N - 1; i >= 0; i--) {
-    const hull = state.smoothHulls[i];
-    if (hull && pointInPolygon([x, y], hull)) return i;
-  }
-  return -1;
-}
-
-// clientX/clientY (viewport coords, e.g. from a click/touch event) → whether
-// a link was found and opened at that point. Returns false (no-op) while
-// calibrating, so calibration taps are never mistaken for link taps.
+// clientX/clientY (viewport coords) → whether a link was found and opened.
+// No-ops while calibrating, so calibration taps are never read as link taps.
 function openIfLinked(clientX, clientY) {
   if (state.calibrating >= 0) return false;
-  const [x, y] = clientToCanvasPoint(clientX, clientY, mainCanvas);
 
-  const i = hitPiece(x, y);
+  const [x, y] = clientToCanvasPoint(clientX, clientY, readCanvas, { round: true });
+  if (x < 0 || y < 0 || x >= readCanvas.width || y >= readCanvas.height) return false;
+
+  const i = pieceAtPixel(y * readCanvas.width + x);
   if (i < 0) return false;
+
   const link = pieceMedia[i] && pieceMedia[i].link;
   if (!link) return false;
 
@@ -40,14 +36,10 @@ function openIfLinked(clientX, clientY) {
 }
 
 export function wireMediaLinks() {
-  // Desktop / mouse.
   mainCanvas.addEventListener('click', e => { openIfLinked(e.clientX, e.clientY); });
 
-  // Touch: handled on touchend (matches calibrate.js's own tap handling),
-  // and preventDefault only when a link actually opened — that suppresses
-  // the trailing synthetic click a touchend normally generates, so the link
-  // doesn't fire twice. Left alone (no preventDefault) when nothing was hit,
-  // so unrelated taps behave exactly as they did before this module existed.
+  // Touch: preventDefault only when a link actually opened, which suppresses the
+  // trailing synthetic click. Unrelated taps are left alone.
   mainCanvas.addEventListener('touchend', e => {
     const t = e.changedTouches[0];
     if (!t) return;

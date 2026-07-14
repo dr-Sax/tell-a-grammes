@@ -86,9 +86,6 @@ async function applyCalData(data) {
       // a piece entry may now exist for media/framing alone, without colour
       // data (see getCalData) — only treat it as calibrated if h/s/v are present.
       state.calibrated[i] = (c && c.h !== undefined) ? { h: c.h, s: c.s, v: c.v } : null;
-      state.smoothHulls[i] = null;
-      state.lastCentroid[i] = null;
-      state.missStreak[i] = 0;
       if (c && c.adjust) {
         // merge over defaults rather than replace outright, so a config
         // saved before a slider was added doesn't leave that key undefined
@@ -190,9 +187,6 @@ export function wireSaveLoad() {
   $('clearAllBtn').onclick = () => {
     if (!confirm('Clear all calibrations?')) return;
     state.calibrated = Array(N).fill(null);
-    state.smoothHulls = Array(N).fill(null);
-    state.lastCentroid = Array(N).fill(null);
-    state.missStreak = Array(N).fill(0);
     $('calName').textContent = '';
     buildUI();
   };

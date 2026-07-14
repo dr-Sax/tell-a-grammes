@@ -1,7 +1,7 @@
 // ── camera ──────────────────────────────────────────────────────────────────
 // Owns the capture video and the proc-resolution read canvas.
 
-import { PROC_TARGET_W, N } from './config.js';
+import { PROC_TARGET_W } from './config.js';
 import { state } from './state.js';
 import { allocBuffers } from './tracker.js';
 import { mainCanvas, canvasWrap } from './dom.js';
@@ -50,10 +50,6 @@ export function applyOrientation() {
   readCanvas.width = PW;
   readCanvas.height = PH;
   allocBuffers(PW, PH);
-  state.smoothHulls = Array(N).fill(null);  // coordinate space changed
-  state.smoothArea  = Array(N).fill(0);
-  state.lastCentroid = Array(N).fill(null);
-  state.missStreak  = Array(N).fill(0);
   return { PW, PH };
 }
 

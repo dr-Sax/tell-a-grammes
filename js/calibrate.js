@@ -58,9 +58,6 @@ function calibrateAt(clientX, clientY) {
 
   const cal = { r: R, g: G, b: B, h: hh, s: ss, v: vv };
   state.calibrated[state.calibrating] = cal;
-  state.smoothHulls[state.calibrating] = null;
-  state.lastCentroid[state.calibrating] = null;
-  state.missStreak[state.calibrating] = 0;
   statusEl.textContent =
     `${PIECES[state.calibrating].name} → RGB(${R}, ${G}, ${B})`;
   state.calibrating = -1;
