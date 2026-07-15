@@ -7,7 +7,7 @@ import {N, MEDIA_SLIDERS} from './config.js';
 export const state = {
   running: false,
   calibrating: -1,                  // piece index being calibrated, or -1
-  calibrated: Array(N).fill(null),  // per piece: { h:0-360, s:0-1, v:0-1 }
+  calibrated: Array(N).fill(null),  // per piece: { r, g, b } — the sampled reference triple
 
 
   // Per-piece caption clock. This is "elapsed seconds while this piece was

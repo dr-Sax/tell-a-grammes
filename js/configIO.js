@@ -10,12 +10,13 @@ import { pieceMedia, loadMediaFromURL, attachCaptionCues, attachSequence } from 
 import { loadPool, serializePool, disposePool, poolSize } from './pool.js';
 import { buildUI, syncSliders } from './ui.js';
 
-// The schema is a strict superset of the original calibration-only file:
-// minArea and per-piece h/s/v/name are unchanged, so old calibration-only JSON
-// files still load fine (missing media/adjust just means "leave that piece's
-// media/framing alone"). Files saved before the CIELAB refactor also carried
-// htol/stol/vtol; those knobs no longer exist, so they're simply ignored on
-// load rather than restored.
+// A piece's colour is saved as the sampled r/g/b triple — the exact record
+// calibrate.js stores and quantize.js claims clusters with, so a config
+// round-trips detection losslessly. (Earlier files saved h/s/v instead; those
+// fields are no longer read, so pre-RGB configs load with their media and
+// framing intact but their colours uncalibrated — one re-tap per colour and a
+// re-save brings such a file forward.) Missing media/adjust on a piece just
+// means "leave that piece's media/framing alone".
 //
 // Top-level (new):
 //   assets — a flat pool of image/gif references [{ type, url }, …] that any
@@ -59,7 +60,7 @@ function getCalData() {
     if (!c && !isCaption && !isSequence && !hasMediaURL && !adjustTouched) return null;
 
     const out = { name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
-    if (c) Object.assign(out, { h: c.h, s: c.s, v: c.v });
+    if (c) Object.assign(out, { r: c.r, g: c.g, b: c.b });
     if (isCaption) {
       out.media = { type: 'caption', cues: Object.fromEntries(m.cues.map(cue => [String(cue.t), cue.value])) };
       if (m.link) out.media.link = m.link;
@@ -82,9 +83,9 @@ async function applyCalData(data) {
 
   if (Array.isArray(data.pieces)) {
     data.pieces.forEach((c, i) => {
-      // a piece entry may now exist for media/framing alone, without colour
-      // data (see getCalData) — only treat it as calibrated if h/s/v are present.
-      state.calibrated[i] = (c && c.h !== undefined) ? { h: c.h, s: c.s, v: c.v } : null;
+      // a piece entry may exist for media/framing alone, without colour data
+      // (see getCalData) — only treat it as calibrated if r/g/b are present.
+      state.calibrated[i] = (c && c.r !== undefined) ? { r: c.r, g: c.g, b: c.b } : null;
       if (c && c.adjust) {
         // merge over defaults rather than replace outright, so a config
         // saved before a slider was added doesn't leave that key undefined

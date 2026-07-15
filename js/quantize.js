@@ -35,7 +35,6 @@
 // doubles as the structure we seed and re-seed from.
 
 import { labCube, cubeIndex, CUBE, dE2, rgb2lab } from './lab.js';
-import { hsv2rgb } from './hsv.js';
 
 export const NO_CLASS = 255;
 
@@ -108,21 +107,17 @@ export function allocQuantBuffers(w, h, nClasses) {
 }
 
 // ── palette ───────────────────────────────────────────────────────────────────
-// One entry per calibrated slot. The stored RGB is now used ONLY to decide which
+// One entry per calibrated slot. The stored RGB is used ONLY to decide which
 // discovered cluster this entry claims — it is never itself a match target, and
-// nothing drifts it. Legacy configs carrying only h/s/v still work: a rough
-// colour is plenty to pick out the right cluster.
+// nothing drifts it. A calibration record is exactly { r, g, b }: what
+// calibrate.js samples, what configIO.js saves and loads.
 export function buildPalette(calibrated) {
   const palette = [];
   for (let i = 0; i < calibrated.length; i++) {
     const c = calibrated[i];
     if (!c) continue;
-    let { r, g, b } = c;
-    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
-      [r, g, b] = hsv2rgb(c.h, c.s, c.v);
-    }
-    const [L, a, bb] = rgb2lab(r, g, b);
-    palette.push({ pi: i, r, g, b, L, a: a, b: bb });
+    const [L, a, bb] = rgb2lab(c.r, c.g, c.b);
+    palette.push({ pi: i, r: c.r, g: c.g, b: c.b, L, a: a, b: bb });
   }
   return palette;
 }

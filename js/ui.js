@@ -6,7 +6,7 @@
 
 import { PIECES, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
-import { swatchColor } from './hsv.js';
+import { swatchColor } from './color.js';
 import {
   tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $,
   mainCanvas, stereoCanvas, canvasWrap, stereoControlsEl, statusEl
@@ -139,9 +139,7 @@ export function buildUI() {
 
     const stats = document.createElement('span');
     stats.className = 'piece-stats';
-    stats.textContent = cal && Number.isFinite(cal.r)
-      ? `${cal.r},${cal.g},${cal.b}`
-      : (cal ? `H${Math.round(cal.h)}°` : '—');
+    stats.textContent = cal ? `${cal.r},${cal.g},${cal.b}` : '—';
 
     const calBtn = document.createElement('button');
     calBtn.className = 'cal-btn' +

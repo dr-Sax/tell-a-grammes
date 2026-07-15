@@ -15,13 +15,8 @@
 //   That filter would now reject the two things we most want to calibrate:
 //   white and black. Every pixel in the patch votes.
 //
-// h/s/v are still written onto the record, purely so the UI (swatches, the
-// piece-list stats line) keeps working unchanged. They are DERIVED. Nothing in
-// the detection path reads them.
-
 import { PIECES } from './config.js';
 import { state } from './state.js';
-import { rgb2hsv } from './hsv.js';
 import { mainCanvas, tapHint, crosshair, statusEl, overlayPanel, clientToCanvasPoint } from './dom.js';
 import { readCanvas, readCtx, drawOriented, video } from './camera.js';
 import { pieceMedia } from './media.js';
@@ -54,10 +49,7 @@ function calibrateAt(clientX, clientY) {
   if (n < 4) { statusEl.textContent = 'Tap missed — try again'; return; }
 
   const R = medianOf(rs, n), G = medianOf(gs, n), B = medianOf(bs, n);
-  const [hh, ss, vv] = rgb2hsv(R, G, B);
-
-  const cal = { r: R, g: G, b: B, h: hh, s: ss, v: vv };
-  state.calibrated[state.calibrating] = cal;
+  state.calibrated[state.calibrating] = { r: R, g: G, b: B };
   statusEl.textContent =
     `${PIECES[state.calibrating].name} → RGB(${R}, ${G}, ${B})`;
   state.calibrating = -1;

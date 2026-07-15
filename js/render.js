@@ -3,7 +3,7 @@
 // strip. Reads detection results; never mutates them.
 
 import { PIECES, N } from './config.js';
-import { swatchColor } from './hsv.js';
+import { swatchColor } from './color.js';
 import { state } from './state.js';
 import { mainCtx, debugBar } from './dom.js';
 import { pieceMedia } from './media.js';
