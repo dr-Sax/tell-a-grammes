@@ -47,7 +47,7 @@ export const PROC_TARGET_W = 320;
 //                     by construction, so the weight isn't a choice any more.
 //   soft / reject   — absolute distances, in units nobody could reason about.
 //                     Now derived from the palette's own scale: how far apart
-//                     ITS colours actually are (see quantize.js).
+//                     ITS colours actually are (see detect.js).
 //   ema             — a smoothing rate, not a colour decision. Now a constant.
 //
 // What's left is the one number that was never a colour dial to begin with:

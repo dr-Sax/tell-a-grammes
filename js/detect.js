@@ -1,42 +1,41 @@
-// ── quantize: unsupervised ink discovery in CIELAB ────────────────────────────
-// The relationship between a tap and a colour is now inverted.
+// ── detect: camera pixels → per-colour stencils ───────────────────────────────
+// The whole detection system in one module. The pipeline, per frame:
 //
-// Before: a tap DEFINED a colour, and classification was argmin over the tapped
-// colours. That has an unavoidable consequence — nearest-neighbour assignment
-// partitions ALL of colour space among the entries you gave it. There is no
-// "none of the above". Tap two blues and every pixel in the room (paper, skin,
-// the table) is handed to whichever blue it happens to sit nearest, because it
-// has nowhere else to go. White paper is only ΔE 17 from a light blue; it never
-// stood a chance. So you had to hand-calibrate the background — supplying
-// information the system couldn't infer.
+//   histogram the frame over a 5-bit Lab cube (lab.js)
+//     → k-means discovers the frame's colour clusters, unsupervised
+//     → each calibrated tap CLAIMS its nearest cluster group; the rest are
+//       background
+//     → every pixel gets an owner + a soft 0-1 membership, EMA'd over time
+//     → per colour: membership field → RGBA stencil that render.js pours
+//       media through (destination-in)
 //
-// Except it CAN infer it. The paper is right there in the frame. A flat-ink
-// print, seen by a camera, produces a pixel distribution that IS a handful of
-// tight clusters — one per ink, one for the paper, one for shadow. That
-// structure doesn't need to be described; it needs to be FOUND.
+// The relationship between a tap and a colour is inverted from classic
+// calibration. A tap doesn't DEFINE a colour with tolerance bands around it —
+// nearest-neighbour over taps partitions ALL of colour space, with no "none of
+// the above", so paper/skin/shadow would be handed to whichever ink they sit
+// closest to. (White paper is only ΔE 17 from a light blue; it never stood a
+// chance.) Instead, k-means finds every colour actually present — inks, paper,
+// shadow — and a tap simply claims the cluster nearest to it. Unclaimed
+// clusters compete for their own pixels and draw nothing, which is what keeps
+// the paper off your ink with no background calibration and no reject radius.
 //
-// Now: k-means runs unsupervised over the whole frame and discovers K clusters.
-// Every colour present gets one, whether or not you care about it. Then a tap
-// simply CLAIMS the cluster nearest to it — "that one, the GIF goes in that
-// one". Clusters nobody claims are background: they compete for their own
-// pixels, they keep the paper off your ink, and nothing is drawn for them.
-//
-// Consequences worth noticing:
-//   • No background calibration. Paper, skin, shadow, and table are discovered.
-//   • No reject radius. Unclaimed clusters absorb everything that isn't ink,
-//     which is what a reject threshold was badly approximating.
 //   • Re-tapping is instant. Ownership is recomputed every frame from the
 //     current taps; the clusters themselves never need re-seeding.
 //   • A bad tap can't poison a cluster, because a tap no longer moves anything.
 //
-// k-means runs over a HISTOGRAM of the 5-bit Lab cube, not over raw pixels:
-// ~few thousand populated cells instead of 77k pixels, each weighted by its
-// population. Same answer, an order of magnitude less work, and the histogram
-// doubles as the structure we seed and re-seed from.
+// k-means runs over a HISTOGRAM of the cube, not over raw pixels: ~few thousand
+// populated cells instead of 77k pixels, each weighted by its population. Same
+// answer, an order of magnitude less work.
+//
+// The only classical CV in the module is connected-component labelling, used
+// for exactly one job: throwing away specks. Every surviving component is
+// kept, never just the biggest — disconnected regions, holes, counters and
+// interlocks are the point.
 
+import { params, N } from './config.js';
 import { labCube, cubeIndex, CUBE, dE2, rgb2lab } from './lab.js';
 
-export const NO_CLASS = 255;
+const NO_CLASS = 255;
 
 // ── constants (deliberately not sliders) ──────────────────────────────────────
 
@@ -93,17 +92,30 @@ let ready = false;
 // clusterOwner[k] = palette index that claimed cluster k, or -1 (background)
 let clusterOwner = new Int8Array(K).fill(-1);
 
-let pxClass = null;   // Uint8Array(n)
-let pxConf  = null;   // Uint8Array(n)
-let alpha   = [];     // Float32Array(n) per palette entry
+let pxClass = null;       // Uint8Array(n): per-pixel owning palette idx / NO_CLASS
+let pxConf  = null;       // Uint8Array(n): per-pixel 0-255 soft membership
+let alpha   = [];         // Float32Array(n) per palette slot: EMA'd 0-1 field
+
+let labels, labelStack;   // connected-component scratch
+let hard;                 // Uint8 thresholded mask, reused per class
+let rgba;                 // shared proc-res RGBA stencil handed to render.js
+
+let lastPalette = [];     // classifyFrame's palette, kept for pieceAtPixel
 
 export function resetClusters() { ready = false; }
 
-export function allocQuantBuffers(w, h, nClasses) {
+// One allocator for everything, sized to the proc resolution. Membership
+// fields are per-palette-slot, and there can never be more slots than pieces —
+// so the count is just N.
+export function allocBuffers(w, h) {
   const n = w * h;
   pxClass = new Uint8Array(n);
   pxConf  = new Uint8Array(n);
-  alpha = Array.from({ length: nClasses }, () => new Float32Array(n));
+  alpha = Array.from({ length: N }, () => new Float32Array(n));
+  labels = new Int32Array(n);
+  labelStack = new Int32Array(n);
+  hard = new Uint8Array(n);
+  rgba = new Uint8ClampedArray(n * 4);
 }
 
 // ── palette ───────────────────────────────────────────────────────────────────
@@ -111,7 +123,7 @@ export function allocQuantBuffers(w, h, nClasses) {
 // discovered cluster this entry claims — it is never itself a match target, and
 // nothing drifts it. A calibration record is exactly { r, g, b }: what
 // calibrate.js samples, what configIO.js saves and loads.
-export function buildPalette(calibrated) {
+function buildPalette(calibrated) {
   const palette = [];
   for (let i = 0; i < calibrated.length; i++) {
     const c = calibrated[i];
@@ -221,7 +233,7 @@ function assignOwners(palette) {
 }
 
 // ── the frame pass ────────────────────────────────────────────────────────────
-export function quantizeFrame(img, palette, w, h) {
+function quantizeFrame(img, palette, w, h) {
   const n = w * h;
   const k = palette.length;
   if (!k || !pxClass || pxClass.length !== n) return;
@@ -334,7 +346,95 @@ function stepCentres(sL, sA, sB, wt, n, worstCell) {
   }
 }
 
-// The EMA'd 0-1 membership field for palette index c. Live buffer — read it,
-// don't retain it.
-export function classAlpha(c) { return alpha[c]; }
-export function pixelClasses() { return pxClass; }
+// ── public API ────────────────────────────────────────────────────────────────
+
+// Classify the frame. Call once per frame, before any detectClassStencil.
+// Returns the palette, so the caller can map class index → piece index
+// (calibrated slots may be sparse, so the two are not the same number).
+export function classifyFrame(img, calibrated, w, h) {
+  lastPalette = buildPalette(calibrated);
+  quantizeFrame(img, lastPalette, w, h);
+  return lastPalette;
+}
+
+// Which piece owns the pixel at proc-space index `p`, or -1. This is the whole
+// of hit-testing (see links.js): the classifier already knows who owns every
+// pixel, so asking it is both simpler and more faithful than reconstructing a
+// polygon and ray-casting into it.
+export function pieceAtPixel(p) {
+  if (!pxClass || p < 0 || p >= pxClass.length) return -1;
+  const c = pxClass[p];
+  if (c === NO_CLASS || c >= lastPalette.length) return -1;
+  return lastPalette[c].pi;
+}
+
+// Flood-fill `hard`, zeroing every component smaller than minA. 8-connected, so
+// a diagonal hairline in the print (the crossbar of that Y) stays whole instead
+// of fragmenting into rejected specks.
+function rejectSpecks(w, h, minA) {
+  const n = w * h;
+  labels.fill(0);
+  let cur = 0;
+  for (let s = 0; s < n; s++) {
+    if (!hard[s] || labels[s]) continue;
+    cur++;
+    let sp = 0, head = 0;
+    labelStack[sp++] = s; labels[s] = cur;
+    while (sp > head) {
+      const idx = labelStack[head++];
+      const x = idx % w, y = (idx / w) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy; if (ny < 0 || ny >= h) continue;
+        const nrow = ny * w;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx; if (nx < 0 || nx >= w) continue;
+          const nidx = nrow + nx;
+          if (hard[nidx] && !labels[nidx]) { labels[nidx] = cur; labelStack[sp++] = nidx; }
+        }
+      }
+    }
+    // labelStack[0..sp) now holds exactly this component's members
+    if (sp < minA) for (let m = 0; m < sp; m++) hard[labelStack[m]] = 0;
+  }
+}
+
+// One colour → one stencil. `c` is a palette index (from classifyFrame).
+// Returns { rgba, w, h, bx, by, bw, bh, filled } — the exact shape render.js's
+// drawFillOverlay consumes. Null if the colour isn't meaningfully present.
+//
+// The stencil's alpha is the SMOOTHED membership field, not a hard 0/255 mask.
+// That's what gives soft edges where one printed ink meets another, and what
+// stops boundary pixels from strobing under sensor noise. The connected-
+// component pass only gates WHICH pixels may appear — it never quantises their
+// alpha.
+export function detectClassStencil(c, w, h) {
+  const n = w * h;
+  const field = alpha[c];
+  if (!field) return null;
+
+  // hard mask for component analysis: "this pixel is more this colour than not"
+  for (let p = 0; p < n; p++) hard[p] = field[p] > 0.5 ? 1 : 0;
+  rejectSpecks(w, h, params.minArea);
+
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  let filled = 0;
+
+  for (let p = 0, q = 0; p < n; p++, q += 4) {
+    if (!hard[p]) { rgba[q + 3] = 0; continue; }
+    rgba[q] = 255; rgba[q + 1] = 255; rgba[q + 2] = 255;
+    rgba[q + 3] = Math.round(Math.min(1, field[p]) * 255);
+    const x = p % w, y = (p / w) | 0;
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    filled++;
+  }
+
+  if (filled < params.minArea) return null;
+
+  return {
+    rgba, w, h,
+    bx: minX, by: minY, bw: maxX - minX + 1, bh: maxY - minY + 1,
+    filled,
+  };
+}

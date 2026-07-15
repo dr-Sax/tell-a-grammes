@@ -1,6 +1,6 @@
 // ── calibrate: tap-to-sample colour calibration + hover readout ───────────────
 // A tap now stores an RGB reference triple. That is the whole calibration —
-// detection compares pixels to these triples directly (quantize.js), so what
+// detection compares pixels to these triples directly (detect.js), so what
 // you sample IS what you match against, with no tolerance bands to tune.
 //
 // Two changes from the HSV era worth calling out:

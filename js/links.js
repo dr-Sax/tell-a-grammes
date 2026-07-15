@@ -14,7 +14,7 @@
 import { state } from './state.js';
 import { mainCanvas, clientToCanvasPoint } from './dom.js';
 import { readCanvas } from './camera.js';
-import { pieceAtPixel } from './tracker.js';
+import { pieceAtPixel } from './detect.js';
 import { pieceMedia } from './media.js';
 
 // clientX/clientY (viewport coords) → whether a link was found and opened.

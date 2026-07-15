@@ -11,7 +11,7 @@ import { loadPool, serializePool, disposePool, poolSize } from './pool.js';
 import { buildUI, syncSliders } from './ui.js';
 
 // A piece's colour is saved as the sampled r/g/b triple — the exact record
-// calibrate.js stores and quantize.js claims clusters with, so a config
+// calibrate.js stores and detect.js claims clusters with, so a config
 // round-trips detection losslessly. (Earlier files saved h/s/v instead; those
 // fields are no longer read, so pre-RGB configs load with their media and
 // framing intact but their colours uncalibrated — one re-tap per colour and a

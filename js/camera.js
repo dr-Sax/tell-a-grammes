@@ -3,7 +3,7 @@
 
 import { PROC_TARGET_W } from './config.js';
 import { state } from './state.js';
-import { allocBuffers } from './tracker.js';
+import { allocBuffers } from './detect.js';
 import { mainCanvas, canvasWrap } from './dom.js';
 
 export const video = document.createElement('video');

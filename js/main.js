@@ -18,8 +18,7 @@ import {
   panelToggle, overlayPanel, stereoCanvas,
 } from './dom.js';
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
-import { classifyFrame, detectClassStencil } from './tracker.js';
-import { resetClusters } from './quantize.js';
+import { classifyFrame, detectClassStencil, resetClusters } from './detect.js';
 import { renderDebugBar, drawFillOverlay } from './render.js';
 import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider } from './ui.js';
 import { wireCalibration } from './calibrate.js';

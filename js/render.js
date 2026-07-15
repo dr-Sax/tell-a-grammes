@@ -14,7 +14,7 @@ import { timelineValueAt } from './timeline.js';
 // ── colour-fill overlay ───────────────────────────────────────────────────────
 // Renders a piece as "media poured into every pixel of its colour" rather than
 // a tracked polygon — so spirals, interlocking shapes, and holes all work. Uses
-// the colour mask (proc-res RGBA stencil from tracker.detectFillMask) as a
+// the colour mask (proc-res RGBA stencil from detect.js's detectClassStencil) as a
 // per-pixel stencil via a destination-in composite, which is the raster
 // equivalent of a polygon clip — except a stencil can express holes, counters
 // and disconnected regions, which is exactly why the polygon path is gone.
@@ -95,7 +95,7 @@ function paintMedia(ctx, i, bx, by, bw, bh, MW, MH) {
   }
 }
 
-// res = { rgba, w:PW, h:PH, bx, by, bw, bh, filled } from detectFillMask.
+// res = { rgba, w:PW, h:PH, bx, by, bw, bh, filled } from detectClassStencil.
 export function drawFillOverlay(i, res, PW, PH, MW, MH) {
   ensureFillCanvases(PW, PH, MW, MH);
 
