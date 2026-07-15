@@ -3,22 +3,13 @@
 // strip. Reads detection results; never mutates them.
 
 import { PIECES, N } from './config.js';
-import { hsvToHex, rgbToHex } from './hsv.js';
+import { swatchColor } from './hsv.js';
 import { state } from './state.js';
 import { mainCtx, debugBar } from './dom.js';
 import { pieceMedia } from './media.js';
 import { drawCaption } from './caption.js';
 import { poolAsset } from './pool.js';
 import { timelineValueAt } from './timeline.js';
-
-// A calibrated colour's swatch/wash colour. Post-refactor a cal record carries
-// the sampled RGB triple (which is the literal thing detection matches
-// against); configs saved before that only carry h/s/v, so fall back.
-function swatchColor(cal) {
-  if (!cal) return '#888';
-  if (Number.isFinite(cal.r)) return rgbToHex(cal.r, cal.g, cal.b);
-  return hsvToHex(cal.h, cal.s, cal.v);
-}
 
 // ── colour-fill overlay ───────────────────────────────────────────────────────
 // Renders a piece as "media poured into every pixel of its colour" rather than

@@ -11,9 +11,11 @@ import { loadPool, serializePool, disposePool, poolSize } from './pool.js';
 import { buildUI, syncSliders } from './ui.js';
 
 // The schema is a strict superset of the original calibration-only file:
-// htol/stol/vtol/minArea and per-piece h/s/v/name are unchanged, so old
-// calibration-only JSON files still load fine (missing media/adjust just
-// means "leave that piece's media/framing alone").
+// minArea and per-piece h/s/v/name are unchanged, so old calibration-only JSON
+// files still load fine (missing media/adjust just means "leave that piece's
+// media/framing alone"). Files saved before the CIELAB refactor also carried
+// htol/stol/vtol; those knobs no longer exist, so they're simply ignored on
+// load rather than restored.
 //
 // Top-level (new):
 //   assets — a flat pool of image/gif references [{ type, url }, …] that any
@@ -42,9 +44,7 @@ import { buildUI, syncSliders } from './ui.js';
 //            sequence these apply to whichever pool asset is active, so every
 //            frame in the sequence shares this one piece's framing.
 function getCalData() {
-  const data = {
-    htol: params.htol, stol: params.stol, vtol: params.vtol, minArea: params.minArea,
-  };
+  const data = { minArea: params.minArea };
   // Only carry the pool when something's actually in it, so calibration-only /
   // caption-only saves stay as clean as they were before sequences existed.
   if (poolSize()) data.assets = serializePool();
@@ -77,8 +77,7 @@ function getCalData() {
 }
 
 async function applyCalData(data) {
-  for (const key of ['htol', 'stol', 'vtol', 'minArea'])
-    if (data[key] !== undefined) params[key] = data[key];
+  if (data.minArea !== undefined) params.minArea = data.minArea;
   syncSliders();
 
   if (Array.isArray(data.pieces)) {
@@ -123,10 +122,7 @@ async function applyCalData(data) {
           attachSequence(i, media.timeline, buildUI);
         } else if (media.url) {
           statusEl.textContent = `Loading media for ${PIECES[i] ? PIECES[i].name : 'piece ' + (i + 1)}…`;
-          await loadMediaFromURL(i, media.url, buildUI, {
-            start: media.start, end: media.end, 
-            speed: media.speed, volume: media.volume
-          });
+          await loadMediaFromURL(i, media.url, buildUI);
         } else {
           continue; // nothing usable for this piece
         }

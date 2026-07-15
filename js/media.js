@@ -124,7 +124,7 @@ export function loadMediaFile(i, file, refresh) {
   attachBlob(i, file, refresh, null).catch(() => {});
 }
 
-export async function loadMediaFromURL(i, url, refresh, opts={}) {
+export async function loadMediaFromURL(i, url, refresh) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();

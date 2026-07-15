@@ -6,7 +6,7 @@
 
 import { PIECES, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
-import { hsvToHex, rgbToHex } from './hsv.js';
+import { swatchColor } from './hsv.js';
 import {
   tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $,
   mainCanvas, stereoCanvas, canvasWrap, stereoControlsEl, statusEl
@@ -116,15 +116,6 @@ export function wireStereoSlider() {
 // nearest-colour classification that is no longer a fault condition — it's the
 // headline feature. Two blues 15° apart are simply two palette entries, and the
 // classifier puts the boundary exactly between them. The warning is gone.
-
-// Swatch colour: the calibrated RGB itself where we have it (which is now the
-// literal thing being matched against), falling back to the HSV fields for
-// configs saved before the RGB refactor.
-function swatchColor(cal, fallback) {
-  if (!cal) return fallback;
-  if (Number.isFinite(cal.r)) return rgbToHex(cal.r, cal.g, cal.b);
-  return hsvToHex(cal.h, cal.s, cal.v);
-}
 
 export function buildUI() {
   uiEl.innerHTML = '';

@@ -87,9 +87,9 @@ function rejectSpecks(w, h, minA) {
 }
 
 // One colour → one stencil. `c` is a palette index (from classifyFrame).
-// Returns { rgba, w, h, bx, by, bw, bh, filled, centroid } — the exact shape
-// render.js's drawFillOverlay already consumes, plus a centroid for main.js's
-// miss/grace bookkeeping. Null if the colour isn't meaningfully present.
+// Returns { rgba, w, h, bx, by, bw, bh, filled } — the exact shape render.js's
+// drawFillOverlay already consumes. Null if the colour isn't meaningfully
+// present.
 //
 // The stencil's alpha is the SMOOTHED membership field, not a hard 0/255 mask.
 // That's what gives soft edges where one printed ink meets another, and what
@@ -106,7 +106,7 @@ export function detectClassStencil(c, w, h) {
   rejectSpecks(w, h, params.minArea);
 
   let minX = w, minY = h, maxX = -1, maxY = -1;
-  let filled = 0, sx = 0, sy = 0;
+  let filled = 0;
 
   for (let p = 0, q = 0; p < n; p++, q += 4) {
     if (!hard[p]) { rgba[q + 3] = 0; continue; }
@@ -115,7 +115,7 @@ export function detectClassStencil(c, w, h) {
     const x = p % w, y = (p / w) | 0;
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
-    sx += x; sy += y; filled++;
+    filled++;
   }
 
   if (filled < params.minArea) return null;
@@ -124,8 +124,5 @@ export function detectClassStencil(c, w, h) {
     rgba, w, h,
     bx: minX, by: minY, bw: maxX - minX + 1, bh: maxY - minY + 1,
     filled,
-    centroid: [sx / filled, sy / filled],
   };
 }
-
-export { NO_CLASS };

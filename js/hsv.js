@@ -42,3 +42,14 @@ export function rgbToHex(r, g, b) {
     .map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0'))
     .join('');
 }
+
+// A calibrated colour's swatch/wash colour. A cal record carries the sampled
+// RGB triple (the literal thing detection matches against); configs saved
+// before that refactor carry only h/s/v, so fall back to those. Shared by
+// render.js (the media colour wash) and ui.js (the piece-list swatches), which
+// previously each kept their own copy.
+export function swatchColor(cal, fallback = '#888') {
+  if (!cal) return fallback;
+  if (Number.isFinite(cal.r)) return rgbToHex(cal.r, cal.g, cal.b);
+  return hsvToHex(cal.h, cal.s, cal.v);
+}
