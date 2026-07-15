@@ -6,6 +6,7 @@
 
 import { PIECES, MEDIA_SLIDERS } from './config.js';
 import { state } from './state.js';
+import { makeSlider } from './sliders.js';
 import { overlayPanel, statusEl } from './dom.js';
 import { pieceMedia, disposeMedia, loadMediaFile, loadMediaFromURL } from './media.js';
 import { captionThumbURL } from './caption.js';
@@ -24,37 +25,23 @@ function closePanelAndRefresh() {
   overlayPanel.classList.remove('open');
 }
 
-// Per-piece framing sliders (zoom / x-shift / y-shift). Mutates the piece's
+// Per-piece framing sliders (zoom / rot / x / y). Mutates the piece's
 // state.mediaAdjust object IN PLACE on input — the rAF loop reads it next frame,
 // so changes are immediate. Never calls buildUI (that would interrupt the drag).
+// Tapping a slider's tag resets it to the config default.
 function buildAdjustRow(i) {
   const row = document.createElement('div');
   row.className = 'piece-adjust';
   const adj = state.mediaAdjust[i];
 
   for (const s of MEDIA_SLIDERS) {
-    const group = document.createElement('label');
-    group.className = 'adjust-group';
-
-    const tag = document.createElement('span');
-    tag.className = 'adjust-tag';
-    tag.textContent = s.label;
-    tag.title = 'reset';
-    tag.onclick = () => { adj[s.key] = s.def; range.value = s.def; val.textContent = (+s.def).toFixed(2); };
-
-    const range = document.createElement('input');
-    range.type = 'range';
-    range.min = s.min; range.max = s.max; range.step = s.step;
-    range.value = adj[s.key];
-
-    const val = document.createElement('span');
-    val.className = 'adjust-val';
-    val.textContent = (+adj[s.key]).toFixed(2);
-
-    range.oninput = () => { adj[s.key] = +range.value; val.textContent = (+range.value).toFixed(2); };
-
-    group.append(tag, range, val);
-    row.appendChild(group);
+    row.appendChild(makeSlider({
+      label: s.label, min: s.min, max: s.max, step: s.step,
+      compact: true, resetTo: s.def,
+      get: () => adj[s.key],
+      set: v => { adj[s.key] = v; },
+      format: v => (+v).toFixed(2),
+    }).el);
   }
   return row;
 }

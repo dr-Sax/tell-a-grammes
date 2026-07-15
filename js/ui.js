@@ -6,6 +6,7 @@
 
 import { PIECES, params, TOL_SLIDERS } from './config.js';
 import { state } from './state.js';
+import { makeSlider } from './sliders.js';
 import { swatchColor } from './color.js';
 import {
   tapHint, crosshair, uiEl, controlsEl, overlayPanel, panelToggle, $,
@@ -16,98 +17,44 @@ import { initStereoGL } from './stereoGL.js';
 
 let glReady = false;
 
+// Detection sliders (top control bar), plus their sync handles — the factory
+// returns a sync() per slider, so a config load re-reads params through the
+// same closure the slider itself uses. No DOM ids involved.
+let tolSyncs = [];
+
 export function wireSliders() {
   controlsEl.innerHTML = '';
-  for (const s of TOL_SLIDERS) {
-    const group = document.createElement('div');
-    group.className = 'ctrl-group';
-
-    const val = document.createElement('span');
-    val.id = s.key + 'Val';
-    val.textContent = params[s.key];
-
-    const label = document.createElement('label');
-    label.append(s.label + ' ', val);
-
-    const range = document.createElement('input');
-    range.type = 'range';
-    range.id = s.key + 'Range';
-    range.min = s.min; range.max = s.max; range.step = s.step;
-    range.value = params[s.key];
-    range.style.flex = '1';
-    range.oninput = () => { params[s.key] = +range.value; val.textContent = params[s.key]; };
-
-    group.append(label, range);
-    controlsEl.appendChild(group);
-  }
+  tolSyncs = TOL_SLIDERS.map(s => {
+    const { el, sync } = makeSlider({
+      label: s.label, min: s.min, max: s.max, step: s.step,
+      get: () => params[s.key],
+      set: v => { params[s.key] = v; },
+    });
+    controlsEl.appendChild(el);
+    return sync;
+  });
 }
 
-// Reflect the current params back into the slider DOM (after a config load).
+// Reflect the current params back into the sliders (after a config load).
 export function syncSliders() {
-  for (const s of TOL_SLIDERS) {
-    const range = $(s.key + 'Range'), val = $(s.key + 'Val');
-    if (range) range.value = params[s.key];
-    if (val) val.textContent = params[s.key];
-  }
-}
-
-function buildStereoRange({ label, min, max, step, get, set, format }) {
-  const val = document.createElement('span');
-  val.textContent = format(get());
-
-  const lbl = document.createElement('label');
-  lbl.append(label + ' ', val);
-
-  const range = document.createElement('input');
-  range.type = 'range';
-  range.min = min; range.max = max; range.step = step;
-  range.value = get();
-  range.style.flex = '1';
-  range.oninput = () => {
-    set(+range.value);
-    val.textContent = format(get());
-  };
-
-  const group = document.createElement('div');
-  group.className = 'ctrl-group';
-  group.append(lbl, range);
-  return group;
+  for (const sync of tolSyncs) sync();
 }
 
 export function wireStereoSlider() {
   stereoControlsEl.innerHTML = '';
+  const stereo = (label, min, max, step, key, format) =>
+    makeSlider({
+      label, min, max, step, format,
+      get: () => state[key],
+      set: v => { state[key] = v; },
+    }).el;
 
   stereoControlsEl.append(
-    buildStereoRange({
-      label: 'Eye angle', min: -15, max: 15, step: 0.5,
-      get: () => state.stereoAngle,
-      set: v => { state.stereoAngle = v; },
-      format: v => v.toFixed(1) + '°',
-    }),
-    buildStereoRange({
-      label: 'L shift', min: -0.3, max: 0.3, step: 0.005,
-      get: () => state.stereoShiftL,
-      set: v => { state.stereoShiftL = v; },
-      format: v => Math.round(v * 100) + '%',
-    }),
-    buildStereoRange({
-      label: 'R shift', min: -0.3, max: 0.3, step: 0.005,
-      get: () => state.stereoShiftR,
-      set: v => { state.stereoShiftR = v; },
-      format: v => Math.round(v * 100) + '%',
-    }),
-    buildStereoRange({
-      label: 'Distort', min: -0.5, max: 0.5, step: 0.01,
-      get: () => state.stereoDistort,
-      set: v => { state.stereoDistort = v; },
-      format: v => v.toFixed(2),
-    }),
-    buildStereoRange({
-      label: 'Fill', min: 1, max: 2, step: 0.01,
-      get: () => state.stereoFill,
-      set: v => { state.stereoFill = v; },
-      format: v => v.toFixed(2) + '×',
-    }),
+    stereo('Eye angle', -15, 15, 0.5, 'stereoAngle', v => v.toFixed(1) + '°'),
+    stereo('L shift', -0.3, 0.3, 0.005, 'stereoShiftL', v => Math.round(v * 100) + '%'),
+    stereo('R shift', -0.3, 0.3, 0.005, 'stereoShiftR', v => Math.round(v * 100) + '%'),
+    stereo('Distort', -0.5, 0.5, 0.01, 'stereoDistort', v => v.toFixed(2)),
+    stereo('Fill', 1, 2, 0.01, 'stereoFill', v => v.toFixed(2) + '×'),
   );
 }
 
