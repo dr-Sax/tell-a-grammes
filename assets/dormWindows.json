@@ -1,0 +1,97 @@
+{
+  "minArea": 20,
+  "assets": [
+    { "type": "gif", "url": "https://media3.giphy.com/media/0K1NGNF6WaC02Z3ySG/200.gif" },
+    { "type": "gif", "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExbWtueDVjdnVqbm9hOHU0dHJmemJjNnVrazQ4emluZGo3aWRsZDZpZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7buh0sx5p7qrnJ5u/giphy.gif" },
+    { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXAwcjRvdXR5eWJoMHl5YnlqN21nZWlsZGtmaXM1dnE5aWRjbjN3NCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/uYsuqAWsJX8sw/giphy.gif" },
+    { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW92NmQ3MXNpeXVsMm9veGV1emxuYXRnZWdxd2EzdGZ2d2E5Mms5byZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Y34v7S5jENXAdbkfYh/giphy.gif" },
+    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZGM3b2dwbmluYWZ4eWZiZmRzZ2IxdXgxM3FuMjFnZGF5N3ZrNTAzNiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/RgZ26pD6oow12/giphy.gif" }
+  ],
+  "pieces": [
+    {
+      "name": "Piece 1",
+      "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
+      "r": 200,
+      "g": 190,
+      "b": 50,
+      "media": {
+        "type": "sequence",
+        "timeline": {
+          "1.76": "0", "2.36": "1",
+          "3.62": "2", "5.46": "3",
+          "7.02": "4"
+        }
+      }
+    },
+    {
+      "name": "Piece 2",
+      "adjust": { "zoom": 1, "rotate": -29.46, "xshift": 0.12, "yshift": 0.24 },
+      "r": 195,
+      "g": 125,
+      "b": 195,
+      "media": {
+        "type": "caption",
+        "cues": {"0.42": "And", "1.18": "it", "1.26": "was", "1.42": "just", "1.9": "enormous,", 
+        "3.32": "enormous", "4.0": "glory", "5.54": "of", "5.88": "freedom.", "7.84": "And", 
+        "8.36": "one", "8.92": "of", "9.1": "the", "9.2": "things", "9.42": "I", "9.62": "remember", 
+        "9.86": "most", "10.22": "is", "10.44": "walking", "10.8": "around", "11.12": "the", 
+        "11.3": "campus", "11.76": "that", "13.78": "fall", "14.26": "and", "14.96": "the", 
+        "15.58": "music", "16.66": "coming", "16.88": "out", "17.18": "of", "17.4": "the", 
+        "17.62": "windows", "18.02": "of", "18.38": "people", "18.62": "were", "19.14": "free", 
+        "19.48": "now", "19.72": "from", "19.94": "their", "20.2": "parents'", "21.08": "strictures", 
+        "21.6": "of", "21.8": "turn", "22.1": "that", "22.3": "thing", "22.58": "down,", "23.14": "like", 
+        "23.6": "I", "23.8": "was.", "25.3": "And", "25.36": "man,", "25.62": "there", "25.74": "was", 
+        "25.9": "high", "26.82": "volume", "27.4": "music", "27.84": "coming", "28.22": "out", 
+        "28.48": "of", "28.66": "every", "28.96": "dorm", "29.32": "window.", "31.24": "It", 
+        "31.38": "was", "31.54": "like", "31.78": "the", "32.32": "new", "32.58": "bands", 
+        "32.9": "were", "33.14": "Led", "33.38": "Zeppelin,", "34.42": "Crosby", "35.42": "Stills", 
+        "35.76": "and", "35.98": "Nash,", "36.86": "McCartney's", "37.76": "solo", "38.2": "album", 
+        "39.18": "the", "39.56": "dead,", "40.62": "the", "40.84": "Stones,", "42.06": "the", 
+        "42.12": "Beatles,", "43.38": "the", "43.58": "whole", "43.82": "anthology.", "45.44": "It", 
+        "45.62": "was", "45.8": "amazing.", "47.18": "I", "47.56": "mean,", "47.78": "and", "48.26": "to", 
+        "48.78": "think", "48.98": "the", "50.62": "first", "50.84": "time", "51.14": "you", "51.32": "heard", 
+        "51.5": "Led", "51.76": "Zeppelin", "52.28": "blasting", "52.76": "out", "53.14": "of", "53.26": "a", 
+        "53.38": "dorm", "53.62": "room", "53.94": "window", "54.36": "as", "54.5": "you", "54.62": "walked", 
+        "54.86": "along,", "55.52": "it", "55.88": "was", "56.08": "just,", "56.92": "just", "58.08": "so", 
+        "58.44": "transportive", "59.5": "to", "59.76": "a", "59.96": "whole", "60.14": "different,", 
+        "60.74": "like", "61.0": "this", "61.34": "is", "61.54": "our", "61.8": "time", "62.2": "now.", 
+        "62.78": "The", "63.54": "rock", "64.02": "and", "64.22": "roll", "64.44": "was", "64.68": "blasting", 
+        "66.04": "It", "66.3": "was", "66.46": "exciting."},
+        "link": "https://omeka.binghamton.edu/omeka/items/show/2407"
+      }
+    },
+    {
+      "name": "Piece 3",
+      "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
+      "r": 80,
+      "g": 200,
+      "b": 225,
+      "media": {
+        "type": "sequence",
+        "timeline": {
+          "1.76": "0", "2.36": "1",
+          "3.62": "2", "5.46": "3",
+          "7.02": "4"
+        }
+      }
+    },
+    {
+      "name": "Piece 4",
+      "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
+      "r": 215,
+      "g": 140,
+      "b": 170,
+      "media": {
+        "type": "sequence",
+        "timeline": {
+          "1.76": "0", "2.36": "1",
+          "3.62": "2", "5.46": "3",
+          "7.02": "4"
+        }
+      }
+    },
+    null,
+    null,
+    null
+  ]
+}
