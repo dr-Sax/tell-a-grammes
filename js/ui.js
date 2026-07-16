@@ -14,6 +14,7 @@ import {
 } from './dom.js';
 import { buildMediaRow } from './ui-media.js';
 import { initStereoGL } from './stereoGL.js';
+import { attachAudio, disposeAudio, startAudio, audioURL } from './audio.js';
 
 let glReady = false;
 
@@ -64,8 +65,49 @@ export function wireStereoSlider() {
 // headline feature. Two blues 15° apart are simply two palette entries, and the
 // classifier puts the boundary exactly between them. The warning is gone.
 
+// Global audio master-clock row: one soundtrack for the whole config, not a
+// per-piece attachment, so it sits above the piece list. Attaching mid-session
+// is itself a user gesture, so play() fires inside it and iOS allows it.
+function buildAudioRow() {
+  const row = document.createElement('div');
+  row.className = 'piece-row';
+  const main = document.createElement('div');
+  main.className = 'piece-main';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'piece-label';
+  const url = audioURL();
+  lbl.textContent = url
+    ? `🔊 ${decodeURIComponent((url.split('/').pop() || url).split('?')[0]) || url}`
+    : '🔇 no audio';
+
+  const urlBtn = document.createElement('button');
+  urlBtn.className = 'cal-btn' + (url ? ' done' : '');
+  urlBtn.textContent = '🔗';
+  urlBtn.title = 'Attach audio master clock (URL)';
+  urlBtn.onclick = () => {
+    const u = prompt('Audio master clock: mp3 URL', url || '');
+    if (!u) return;
+    attachAudio(u.trim());
+    if (state.running) startAudio();
+    buildUI();
+  };
+
+  const clrBtn = document.createElement('button');
+  clrBtn.className = 'clear-btn';
+  clrBtn.textContent = '✕';
+  clrBtn.title = 'Detach audio';
+  clrBtn.disabled = !url;
+  clrBtn.onclick = () => { disposeAudio(); buildUI(); };
+
+  main.append(lbl, urlBtn, clrBtn);
+  row.appendChild(main);
+  return row;
+}
+
 export function buildUI() {
   uiEl.innerHTML = '';
+  uiEl.appendChild(buildAudioRow());
   PIECES.forEach((p, i) => {
     const row = document.createElement('div');
     row.className = 'piece-row';

@@ -10,6 +10,7 @@ import { pieceMedia } from './media.js';
 import { drawCaption } from './caption.js';
 import { poolAsset } from './pool.js';
 import { timelineValueAt } from './timeline.js';
+import { pieceClock } from './audio.js';
 
 // ── colour-fill overlay ───────────────────────────────────────────────────────
 // Renders a piece as "media poured into every pixel of its colour" rather than
@@ -44,25 +45,25 @@ function paintMedia(ctx, i, bx, by, bw, bh, MW, MH) {
   const media = pieceMedia[i];
   const adj = state.mediaAdjust[i];
 
-  // Clock: state.captionElapsed[i] — "seconds while this colour was visible",
-  // advanced in main.js only on frames where the colour was actually found.
+  // Clock: pieceClock(i) — audio.currentTime for every piece while the global
+  // audio master clock is playing (all pieces locked to the soundtrack, no
+  // per-timeline modulo), otherwise this piece's private detected-time clock
+  // (state.captionElapsed[i], advanced in main.js only on frames where the
+  // colour was actually found).
   //
-  // This function previously reached for a global audio master clock via
-  // audioActive() / getAudioTime(), but neither was ever imported into this
-  // file — so the first fill draw threw a ReferenceError, which skipped the
-  // requestAnimationFrame at the bottom of the frame loop and froze the feed on
-  // frame one. It presented as a mobile bug only because the desktop path
-  // happened to be exercising the polygon renderer instead.
-  //
-  // Re-threading the global audio master clock is a separate change.
-  const clock = state.captionElapsed[i];
+  // Historical note: an earlier version of this function called audioActive()
+  // / getAudioTime() without importing them — the ReferenceError on the first
+  // fill draw skipped the requestAnimationFrame at the bottom of the frame
+  // loop and froze the feed on frame one. The clock now comes from audio.js,
+  // imported at the top of this file.
+  const clock = pieceClock(i);
 
   let frameEl = null;
   if (media) {
     if (media.type === 'image' || media.type === 'gif') frameEl = media.el;
     else if (media.type === 'video' && !media.el.paused) frameEl = media.el;
     else if (media.type === 'sequence') {
-      const asset = poolAsset(timelineValueAt(media.cues, clock));
+      const asset = poolAsset(timelineValueAt(media.cues, clock.t, clock.wrap));
       if (asset) frameEl = asset.el;
     }
   }

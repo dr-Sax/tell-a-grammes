@@ -1,12 +1,13 @@
 // ── captions: timed-word overlays ─────────────────────────────────────────────
 // The third per-piece media type. Everything caption-specific lives here:
-// parse the cue file, look up the active word against a piece's "detected-time"
-// clock (state.captionElapsed[i]), and draw it. The clock is *advanced* in
-// main.js — only on frames where the piece is detected — and reset on attach in
-// media.js; this module just reads it.
+// parse the cue file, look up the active word against the piece's clock
+// (pieceClock in audio.js: the global audio master clock while it plays,
+// otherwise this piece's detected-time clock, advanced in main.js only on
+// frames where the piece is detected and reset on attach in media.js), and
+// draw it. This module only reads the clock.
 
-import { state } from './state.js';
 import { parseTimeline, timelineValueAt } from './timeline.js';
+import { pieceClock } from './audio.js';
 
 const WIDTH_FRAC  = 0.50;  // word fills this fraction of the bbox width…
 const HEIGHT_FRAC = 0.50;  // …but is never taller than this fraction of it
@@ -23,7 +24,8 @@ export const parseCues = raw => parseTimeline(raw, v => String(v));
 // single line. `ctx` is already clipped to the piece polygon and the colour
 // wash already painted by the caller.
 export function drawCaption(ctx, cues, i, bx, by, bw, bh, adj = { zoom: 1, xshift: 0, yshift: 0, rotate: 0 }) {
-  const word = timelineValueAt(cues, state.captionElapsed[i]);
+  const clock = pieceClock(i);
+  const word = timelineValueAt(cues, clock.t, clock.wrap);
   if (!word) return;
 
   ctx.font = FONT(100);                       // measure at a fixed size, scale result

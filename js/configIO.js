@@ -8,6 +8,7 @@ import { state } from './state.js';
 import { statusEl, $ } from './dom.js';
 import { pieceMedia, loadMediaFromURL, attachCaptionCues, attachSequence } from './media.js';
 import { loadPool, serializePool, disposePool, poolSize } from './pool.js';
+import { attachAudio, disposeAudio, startAudio, audioURL, audioLoop } from './audio.js';
 import { buildUI, syncSliders } from './ui.js';
 
 // A piece's colour is saved as the sampled r/g/b triple — the exact record
@@ -23,6 +24,9 @@ import { buildUI, syncSliders } from './ui.js';
 //            piece's `sequence` timeline indexes into. Config-level rather than
 //            per-piece so one decoded asset can be shared across pieces (see
 //            pool.js). Omitted entirely when no sequences are in use.
+//   audio  — { url, loop } for the global audio master clock (audio.js): a
+//            hosted file whose currentTime, while playing, drives every
+//            piece's timed media in sync. Omitted when no audio is attached.
 //
 // Per-piece new fields:
 //   media  — { type, url, link? } for images/video/gifs — url is ONLY set if
@@ -49,6 +53,7 @@ function getCalData() {
   // Only carry the pool when something's actually in it, so calibration-only /
   // caption-only saves stay as clean as they were before sequences existed.
   if (poolSize()) data.assets = serializePool();
+  if (audioURL()) data.audio = { url: audioURL(), loop: audioLoop() };
 
   data.pieces = PIECES.map((_, i) => {
     const c = state.calibrated[i];
@@ -107,6 +112,18 @@ async function applyCalData(data) {
     if (n) statusEl.textContent = `Loaded ${n} sequence asset${n === 1 ? '' : 's'}`;
   } else {
     disposePool();
+  }
+
+  // Global audio master clock. An absent `audio` key detaches any current
+  // audio, mirroring how an absent `assets` empties the pool — loading a
+  // config is a full replace, not a merge. If the camera is already running
+  // this play() attempt is outside any user gesture and iOS will likely block
+  // it; startAudio's one-time pointerdown retry catches the next tap.
+  if (data.audio && data.audio.url) {
+    attachAudio(data.audio.url, { loop: data.audio.loop !== false });
+    if (state.running) startAudio();
+  } else {
+    disposeAudio();
   }
 
   if (Array.isArray(data.pieces)) {

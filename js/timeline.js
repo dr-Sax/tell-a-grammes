@@ -32,10 +32,14 @@ export function loopLength(cues) {
 // loopLength. Returns null before the first cue. Note: a cue's value may
 // legitimately be 0 (a valid pool index), so callers must null-check the
 // return, never treat it as falsy.
-export function timelineValueAt(cues, elapsed) {
+//
+// `wrap:false` skips the loop modulo — used when the global audio master
+// clock drives (audio.js): the mp3's own loop defines the cycle, and applying
+// the timeline's period on top would drift the two apart.
+export function timelineValueAt(cues, elapsed, wrap = true) {
   if (!cues.length) return null;
   const period = loopLength(cues);
-  if (Number.isFinite(period) && period > 0) elapsed %= period;
+  if (wrap && Number.isFinite(period) && period > 0) elapsed %= period;
 
   let lo = 0, hi = cues.length - 1, ans = -1;
   while (lo <= hi) {

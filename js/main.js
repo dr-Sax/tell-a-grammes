@@ -26,6 +26,7 @@ import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
 import { renderStereoGL } from './stereoGL.js';
 import { pieceMedia } from './media.js';
+import { startAudio } from './audio.js';
 
 function processFrame(now) {
   if (!state.running) return;
@@ -106,6 +107,10 @@ function processFrame(now) {
 }
 
 startBtn.onclick = async () => {
+  // Audio first, synchronously: this click is the iOS gesture that unlocks
+  // playback, and the activation is transient — it can expire across the
+  // camera await below. No-op when no audio is attached.
+  startAudio();
   try {
     statusEl.textContent = 'Requesting camera…';
     const { PW, PH } = await startCamera();
