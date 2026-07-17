@@ -7,7 +7,7 @@
     { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW92NmQ3MXNpeXVsMm9veGV1emxuYXRnZWdxd2EzdGZ2d2E5Mms5byZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Y34v7S5jENXAdbkfYh/giphy.gif" },
     { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZGM3b2dwbmluYWZ4eWZiZmRzZ2IxdXgxM3FuMjFnZGF5N3ZrNTAzNiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/RgZ26pD6oow12/giphy.gif" }
   ],
-  "audio": { "url": "https://afraid-turquoise-a875yo8c.edgeone.dev/whoreishClovers.mp3", "loop": true },
+  "audio": { "url": "assets/whoreishClovers.mp3", "loop": true },
   "pieces": [
     {
       "name": "Piece 1",
