@@ -102,6 +102,22 @@ async function applyCalData(data) {
   }
   buildUI();
 
+  // Global audio master clock — attached BEFORE the asset pool loads, for two
+  // reasons: attach is synchronous (no await), so the browser starts buffering
+  // the mp3 in parallel with the gif decode below instead of after it; and on
+  // mobile the pool can take long enough that the user taps Start camera while
+  // this function is still running — audio must already have its src by then
+  // (or at least by the time attachAudio runs: startAudio's pendingStart
+  // handshake covers a tap that lands even earlier). An absent `audio` key
+  // detaches, mirroring how an absent `assets` empties the pool — loading a
+  // config is a full replace, not a merge.
+  if (data.audio && data.audio.url) {
+    attachAudio(data.audio.url, { loop: data.audio.loop !== false });
+    if (state.running) startAudio();
+  } else {
+    disposeAudio();
+  }
+
   // Rebuild the shared asset pool first (config-scoped: disposes the previous
   // one, decodes this config's assets in parallel) so sequence indices resolve
   // as soon as pieces attach. Independent of whether any piece uses sequences —
@@ -112,18 +128,6 @@ async function applyCalData(data) {
     if (n) statusEl.textContent = `Loaded ${n} sequence asset${n === 1 ? '' : 's'}`;
   } else {
     disposePool();
-  }
-
-  // Global audio master clock. An absent `audio` key detaches any current
-  // audio, mirroring how an absent `assets` empties the pool — loading a
-  // config is a full replace, not a merge. If the camera is already running
-  // this play() attempt is outside any user gesture and iOS will likely block
-  // it; startAudio's one-time pointerdown retry catches the next tap.
-  if (data.audio && data.audio.url) {
-    attachAudio(data.audio.url, { loop: data.audio.loop !== false });
-    if (state.running) startAudio();
-  } else {
-    disposeAudio();
   }
 
   if (Array.isArray(data.pieces)) {
