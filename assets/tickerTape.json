@@ -1,0 +1,99 @@
+{
+  "minArea": 20,
+  "assets": [
+    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExamttMG5yYWt6amppY3F4NHZmOTcyOXVjdHlmNDJ1OHc3Y2xobjQ3ZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/zWe3YeHW46BwFfNa7j/giphy.gif" },
+    { "type": "gif", "url": "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExZXdlNGUyc2ZkcDFzMnQwZ2pob2Z0dHhjMTB0MXA0aGh5aXd6cHpqcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/0fyskLW73ipFsICZVz/giphy.gif" },
+    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2tlcDg4anIwbWNjZWN2Zm10dndjcXVzaXBhYmR0cWllcm03OTZ0byZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ctkFDXiv7IzOD25gEw/giphy.gif" },
+    { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2R2MmphaGJtcWM4eXhiYzM2MnVtZDk1bzk1aXB5cDFicWlqeXM2MyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/4s5e7PctLdOQuITlSz/giphy.gif" },
+    { "type": "gif", "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbDRpeXRsdmxtaHJlZHZnaDlwemJ3a3I1cW1hcXllbW5jbDR2eG0yNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kwZcTlIhPYcL8wbS8z/giphy.gif" },
+    { "type": "gif", "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYjZyNTcxc3l3Zm9kOTg4ZmJpNW4xeGFocHBubnlhaDNyZmI1OGdnaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kwZcTlIhPYcL8wbS8z/giphy.gif"},
+    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExeDd5d3o4d3kwMGUwNzdjc3gwdXY0bGhucWN0dGcxYTRvZXhoMHV2NSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PxS4gdZ67nSbGnkrNk/giphy.gif"},
+    { "type": "gif", "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExeHR3NHp6aDJrNW4ydGhibTR6Y2pjODRzZ2szZHA5czgzcTl4d29iMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/voXY7dHeg90x4RF74d/giphy.gif"}
+  ],
+  "audio": { "url": "assets/tickerTape.mp3", "loop": true },
+  "pieces": [
+    {
+      "name": "Piece 1",
+      "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
+      "r": 200,
+      "g": 190,
+      "b": 50,
+      "media": {
+        "type": "sequence",
+        "timeline": {
+          "0.00": "0", "20.00": "1",
+          "40.00": "2", "60.00": "3",
+          "70.02": "4"
+        }
+      }
+    },
+    {
+      "name": "Piece 2",
+      "adjust": { "zoom": 1, "rotate": -29.46, "xshift": 0.12, "yshift": 0.24 },
+      "r": 195,
+      "g": 125,
+      "b": 195,
+      "media": {
+        "type": "caption",
+        "cues": {"0.12": "What", "0.4": "would", "0.8": "you", "1.0": "say", "1.28": "created",
+           "1.84": "the", "2.06": "tension", "2.58": "at", "3.34": "Kent", "3.54": "State",
+           "3.84": "leading", "4.16": "up", "4.46": "to", "4.78": "Nixon's", "5.42": "speech",
+           "5.7": "on", "6.66": "April", "6.96": "30th", "7.6": "of", "7.74": "1970", 
+           "8.64": "because", "9.14": "the", "10.7": "campus", "11.06": "is", "11.32": "erupted", 
+           "11.78": "after", "12.08": "that", "12.28": "speech?", "12.68": "Did", "12.9": "you", 
+           "13.06": "hear", "13.32": "the", "13.5": "speech?", "15.66": "Yes,", "16.42": "I", 
+           "16.56": "did", "17.76": "not", "17.96": "actually", "18.24": "hear", "18.52": "it.", 
+           "18.78": "I", "18.86": "read", "19.2": "about", "19.52": "it", "19.86": "on", "20.2": "a", 
+           "20.56": "ticker", "20.96": "tape", "21.18": "machine", "21.54": "at", "22.04": "Taylor", 
+           "22.38": "Hall", "22.76": "on", "23.02": "Kent", "23.26": "State", "23.54": "campus.", 
+           "25.26": "You", "25.28": "probably", "26.16": "know", "26.36": "what", "26.48": "a", 
+           "26.64": "ticker", "26.86": "tape", "27.06": "machine", "27.36": "is.", "28.0": "I", 
+           "30.64": "read", "30.92": "it", "31.1": "as", "31.24": "it", "31.36": "was", "31.52": 
+           "news", "31.82": "that", "32.24": "night,", "32.84": "April", "33.1": "30th,", "34.7": 
+           "and", "35.44": "the", "35.6": "reaction", "35.98": "around", "36.36": "the", "36.56": 
+           "country", "36.88": "of", "37.24": "the", "37.46": "expansion", "37.82": "of", "38.14": 
+           "the", "38.22": "war", "38.46": "where", "38.76": "Nixon,", "39.68": "I", "40.02": "blame", 
+           "40.28": "President", "41.3": "Nixon", "41.76": "and", "41.96": "Governor", "42.22": "Rhodes", 
+           "42.66": "for", "43.0": "the", "43.52": "murders", "43.82": "at", "44.08": "Kent", "44.28": "State", 
+           "44.6": "because", "44.88": "they", "45.12": "set", "45.34": "the", "45.54": "scene", "45.82": "where", 
+           "46.22": "Nixon", "46.78": "said", "47.26": "that", "47.62": "he", "47.82": "would", "47.98": "bring", 
+           "48.18": "us", "48.36": "together", "48.7": "at", "49.64": "a", "49.84": "secret", "50.1": "plan", 
+           "50.5": "to", "50.74": "end", "50.88": "the", "51.02": "war", "51.28": "and", "51.58": "he", 
+           "51.68": "was", "51.84": "just", "52.08": "lying", "52.84": "to", "54.4": "get", "55.04": "elected", 
+           "55.44": "and", "55.74": "to", "56.38": "hold", "56.58": "on", "56.76": "to", "56.9": "power", "57.26": "in", 
+           "57.48": "the", "57.5": "same", "57.52": "time.", "57.54": "The", "57.64": "same", "57.84": "thing", 
+           "58.08": "was", "58.26": "happening", "58.56": "with", "58.86": "Governor", "59.42": "Rhodes", 
+           "60.9": "who", "61.36": "after", "61.8": "the", "62.04": "ROTC", "62.62": "building", "62.92": "was", 
+           "63.18": "burned,", "63.94": "he", "63.96": "made", "64.68": "a", "64.86": "huge", "65.26": "speech,", 
+           "66.92": "inflammatory", "67.28": "speech", "67.9": "with", "68.24": "the", "68.48": "guard", "69.56": "already", 
+           "70.36": "present", "70.78": "on", "71.06": "the", "71.24": "university", "72.08": "campus", "72.68": "about", 
+           "74.08": "the", "74.48": "terrible", "75.48": "terrorists", "76.28": "who", "76.74": "were", "76.98": "organized", 
+           "77.52": "behind", "78.08": "this", "78.54": "which", "78.74": "was", "78.98": "hyperbolic", "80.74": "to", "81.0": "say", 
+           "81.24": "the", "81.48": "least.", "82.0": "He", "82.1": "was", "82.34": "really", "82.66": "giving", "83.08": "the", 
+           "83.52": "anti-war", "85.62": "movement", "85.98": "a", "86.24": "lot", "86.36": "more", "86.62": "credibility", 
+           "87.4": "than", "87.8": "it", "87.96": "deserved", "88.32": "at", "88.58": "the", "88.74": "time", 
+           "89.08": "for", "89.34": "their", "89.52": "organization", "90.2": "and", "90.44": "their", 
+           "90.56": "ability", "90.96": "to", "91.4": "create", "92.8": "the", "93.54": "violent", 
+           "93.88": "resistance.", "99.0": "We", "99.76": "watched", "100.26": "out", "101.26": "his", "101.46": "window", 
+           "101.86": "as", "102.22": "the", "102.38": "ROTC", "102.96": "building", "103.32": "went", "104.04": "up", 
+           "104.2": "in", "104.3": "flames", "104.62": "and", "104.92": "burned", "105.24": "and", "106.3": "I", 
+           "106.42": "know", "106.96": "it's", "107.18": "super", "107.6": "cliche", "108.14": "but", 
+           "108.52": "I", "108.64": "have", "108.8": "to", "108.96": "say", "109.2": "that", "109.56": "while", 
+           "109.88": "this", "110.16": "was", "110.34": "happening", "111.32": "the", "111.76": "radio", "112.66": "station", 
+           "113.02": "from", "113.34": "Cleveland,", "113.86": "I", "113.98": "think", "114.1": "it", "114.22": "was", 
+           "114.32": "WMMS", "115.22": "was", "116.36": "playing", "116.76": "for", "117.8": "what", 
+           "118.0": "it's", "118.2": "worth.", "118.62": "Something's", "119.44": "happening", "119.74": "here", 
+           "120.14": "and", "121.2": "this", "121.88": "building", "122.58": "is", "122.8": "just", 
+           "122.96": "flaming", "123.54": "up", "123.94": "and", "124.2": "I'm", "124.7": "thinking", 
+           "124.94": "wow,", "125.6": "what", "125.84": "the", "126.48": "hell.", "129.0": "And", 
+           "129.12": "so", "129.44": "the", "130.54": "next", "130.78": "day,", "131.42": "Sunday,", "133.34": "there", "134.74": "was..."},
+        "link": "https://omeka.binghamton.edu/omeka/items/show/2407"
+      }
+    },
+    null,
+    null,
+    null,
+    null,
+    null
+  ]
+}
