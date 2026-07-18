@@ -1,14 +1,15 @@
 {
   "minArea": 20,
   "assets": [
-    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExamttMG5yYWt6amppY3F4NHZmOTcyOXVjdHlmNDJ1OHc3Y2xobjQ3ZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/zWe3YeHW46BwFfNa7j/giphy.gif" },
-    { "type": "gif", "url": "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExZXdlNGUyc2ZkcDFzMnQwZ2pob2Z0dHhjMTB0MXA0aGh5aXd6cHpqcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/0fyskLW73ipFsICZVz/giphy.gif" },
-    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2tlcDg4anIwbWNjZWN2Zm10dndjcXVzaXBhYmR0cWllcm03OTZ0byZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ctkFDXiv7IzOD25gEw/giphy.gif" },
-    { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2R2MmphaGJtcWM4eXhiYzM2MnVtZDk1bzk1aXB5cDFicWlqeXM2MyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/4s5e7PctLdOQuITlSz/giphy.gif" },
-    { "type": "gif", "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbDRpeXRsdmxtaHJlZHZnaDlwemJ3a3I1cW1hcXllbW5jbDR2eG0yNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kwZcTlIhPYcL8wbS8z/giphy.gif" },
-    { "type": "gif", "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYjZyNTcxc3l3Zm9kOTg4ZmJpNW4xeGFocHBubnlhaDNyZmI1OGdnaSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kwZcTlIhPYcL8wbS8z/giphy.gif"},
-    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExeDd5d3o4d3kwMGUwNzdjc3gwdXY0bGhucWN0dGcxYTRvZXhoMHV2NSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PxS4gdZ67nSbGnkrNk/giphy.gif"},
-    { "type": "gif", "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExeHR3NHp6aDJrNW4ydGhibTR6Y2pjODRzZ2szZHA5czgzcTl4d29iMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/voXY7dHeg90x4RF74d/giphy.gif"}
+    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExOTZnOXgwend2cXgwaHB1aHk2enQxdGhoMnNmNXRvenB5cXk3NXNyOCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/zWe3YeHW46BwFfNa7j/giphy.gif" },
+    { "type": "gif", "url": "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExMjB1N21zc280cXh1ODJ5YWp6c2ZxdnI5NTRuc2R0N2Y1emxlY3FuYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/0fyskLW73ipFsICZVz/giphy.gif" },
+    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMWNpOWF2OWlveTh4NzBmbWx1engzNnlnMHVsaXV5YWhuMWJoYjdxOCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ctkFDXiv7IzOD25gEw/giphy.gif" },
+    { "type": "gif", "url": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExejI5eHk3Y3I4MHQzaTVvdW5namV1bDM2ZDYzeW5jZW1ia3JocmZ2OSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kwZcTlIhPYcL8wbS8z/giphy.gif" },
+    { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExaHo4bTJnMnJnZXg2Y2Y0MDRkNTdqdW8zbW9xZHU5MWg4dXRnM3M3dyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/4s5e7PctLdOQuITlSz/giphy.gif" },
+    { "type": "gif", "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExY2FldGZ1aTFlMjZlNnFoeHJzMmF0d3pudmVkamd2OWRvMTJ0ejJ2MyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3tvq3mZK0cixKsLtx1/giphy.gif" },
+    { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExajVoNmoxcW96eDlrdzhwajM1amZrc3BtZmdxdDRrczI3cnFkZ3lyeiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PxS4gdZ67nSbGnkrNk/giphy.gif" },
+    { "type": "gif", "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2thdDFqcTg5NnBnbHQ3MGg1M2NtYjJkN2UwbGhuZzd2dHBpdzJtYiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/voXY7dHeg90x4RF74d/giphy.gif" }
+
   ],
   "audio": { "url": "assets/ticker-tape.mp3", "loop": true },
   "pieces": [
@@ -21,9 +22,9 @@
       "media": {
         "type": "sequence",
         "timeline": {
-          "0.00": "0", "20.00": "1",
-          "40.00": "2", "60.00": "3",
-          "70.02": "4"
+          "0.00": "0", "22.00": "1",
+          "39.00": "2", "55.00": "3",
+          "70.0": "4", "90.0": "5", "119.0": "6", "138.0": "7"
         }
       }
     },
@@ -99,9 +100,9 @@
       "media": {
         "type": "sequence",
         "timeline": {
-          "0.00": "0", "20.00": "1",
-          "40.00": "2", "60.00": "3",
-          "70.02": "4"
+          "0.00": "0", "22.00": "1",
+          "39.00": "2", "55.00": "3",
+          "70.0": "4", "90.0": "5", "119.0": "6", "138.0": "7"
         }
       }
     },
