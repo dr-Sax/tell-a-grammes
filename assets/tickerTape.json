@@ -10,7 +10,7 @@
     { "type": "gif", "url": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExeDd5d3o4d3kwMGUwNzdjc3gwdXY0bGhucWN0dGcxYTRvZXhoMHV2NSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PxS4gdZ67nSbGnkrNk/giphy.gif"},
     { "type": "gif", "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExeHR3NHp6aDJrNW4ydGhibTR6Y2pjODRzZ2szZHA5czgzcTl4d29iMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/voXY7dHeg90x4RF74d/giphy.gif"}
   ],
-  "audio": { "url": "assets/tickerTape.mp3", "loop": true },
+  "audio": { "url": "assets/ticker-tape.mp3", "loop": true },
   "pieces": [
     {
       "name": "Piece 1",
@@ -90,7 +90,21 @@
         "link": "https://omeka.binghamton.edu/omeka/items/show/2407"
       }
     },
-    null,
+    {
+      "name": "Piece 3",
+      "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
+      "r": 200,
+      "g": 190,
+      "b": 50,
+      "media": {
+        "type": "sequence",
+        "timeline": {
+          "0.00": "0", "20.00": "1",
+          "40.00": "2", "60.00": "3",
+          "70.02": "4"
+        }
+      }
+    },
     null,
     null,
     null,
