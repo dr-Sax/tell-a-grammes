@@ -16,9 +16,9 @@
     {
       "name": "Piece 1",
       "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
-      "r": 200,
-      "g": 190,
-      "b": 50,
+      "r": 58,
+      "g": 167,
+      "b": 197,
       "media": {
         "type": "sequence",
         "timeline": {
@@ -30,10 +30,10 @@
     },
     {
       "name": "Piece 2",
-      "adjust": { "zoom": 1, "rotate": -29.46, "xshift": 0.12, "yshift": 0.24 },
-      "r": 195,
-      "g": 125,
-      "b": 195,
+      "adjust": { "zoom": 1, "rotate": -29.46, "xshift": 0, "yshift": 0.38 },
+      "r": 239,
+      "g": 229,
+      "b": 208,
       "media": {
         "type": "caption",
         "cues": {"0.12": "What", "0.4": "would", "0.8": "you", "1.0": "say", "1.28": "created",
@@ -94,9 +94,9 @@
     {
       "name": "Piece 3",
       "adjust": { "zoom": 1, "rotate": 0, "xshift": 0, "yshift": 0 },
-      "r": 200,
-      "g": 190,
-      "b": 50,
+      "r": 78,
+      "g": 166,
+      "b": 152,
       "media": {
         "type": "sequence",
         "timeline": {
