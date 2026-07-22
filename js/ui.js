@@ -165,27 +165,32 @@ export function buildUI() {
 }
 
 // ── view controls: feed / fullscreen / stereo ─────────────────────────────────
+// Module-scope so main.js can enter immersive mode straight from the Start
+// camera click (that click is the user gesture requestFullscreen needs — like
+// startAudio, it must run synchronously before the camera await).
+export const enterImmersive = () => {
+  document.body.classList.add('immersive');
+  // Real Fullscreen API where it exists (desktop / Android / iPadOS). iPhone
+  // Safari has none — the CSS class handles layout there.
+  const wrap = $('canvasWrap');
+  const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+  if (req) { try { const p = req.call(wrap); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+  setTimeout(() => window.scrollTo(0, 1), 80);  // nudge Safari toolbars to collapse
+};
+
+export const exitImmersive = () => {
+  document.body.classList.remove('immersive');
+  const ex = document.exitFullscreen || document.webkitExitFullscreen;
+  if (ex && (document.fullscreenElement || document.webkitFullscreenElement)) {
+    try { const p = ex.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  }
+};
+
 export function wireViewControls() {
   panelToggle.onclick = () => overlayPanel.classList.toggle('open');
 
   const fsBtn = $('fsBtn'), exitFs = $('exitFs');
 
-  const enterImmersive = () => {
-    document.body.classList.add('immersive');
-    // Real Fullscreen API where it exists (desktop / Android / iPadOS). iPhone
-    // Safari has none — the CSS class handles layout there.
-    const wrap = $('canvasWrap');
-    const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
-    if (req) { try { const p = req.call(wrap); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
-    setTimeout(() => window.scrollTo(0, 1), 80);  // nudge Safari toolbars to collapse
-  };
-  const exitImmersive = () => {
-    document.body.classList.remove('immersive');
-    const ex = document.exitFullscreen || document.webkitExitFullscreen;
-    if (ex && (document.fullscreenElement || document.webkitFullscreenElement)) {
-      try { const p = ex.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
-    }
-  };
   fsBtn.onclick = enterImmersive;
   exitFs.onclick = exitImmersive;
   const onFsChange = () => {

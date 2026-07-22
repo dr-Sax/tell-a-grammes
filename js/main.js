@@ -20,7 +20,10 @@ import {
 import { readCanvas, readCtx, drawOriented, startCamera } from './camera.js';
 import { classifyFrame, detectClassStencil, resetClusters } from './detect.js';
 import { renderDebugBar, drawFillOverlay } from './render.js';
-import { buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider } from './ui.js';
+import {
+  buildUI, syncSliders, wireSliders, wireViewControls, wireStereoSlider,
+  enterImmersive, exitImmersive,
+} from './ui.js';
 import { wireCalibration } from './calibrate.js';
 import { wireSaveLoad, loadConfigFromURL } from './configIO.js';
 import { wireMediaLinks } from './links.js';
@@ -107,10 +110,11 @@ function processFrame(now) {
 }
 
 startBtn.onclick = async () => {
-  // Audio first, synchronously: this click is the iOS gesture that unlocks
-  // playback, and the activation is transient — it can expire across the
-  // camera await below. No-op when no audio is attached.
+  // Audio and fullscreen first, synchronously: this click is the user gesture
+  // that unlocks both iOS audio playback and requestFullscreen, and the
+  // activation is transient — it can expire across the camera await below.
   startAudio();
+  enterImmersive();
   try {
     statusEl.textContent = 'Requesting camera…';
     const { PW, PH } = await startCamera();
@@ -121,12 +125,16 @@ startBtn.onclick = async () => {
     controlsEl.style.display = 'flex';
     calControls.style.display = 'flex';
     panelToggle.style.display = 'block';
-    overlayPanel.classList.add('open');
+    // Panel stays minimized — ☰ controls (panelToggle) opens it on demand.
+    // Optional escape hatch for calibration sessions: ?panel=open
+    if (new URLSearchParams(location.search).get('panel') === 'open')
+      overlayPanel.classList.add('open');
     cvStatusEl.textContent = `Running at ${PW}×${PH} proc res — pure JS`;
     statusEl.textContent = 'Fill the frame with the print, then calibrate by tapping each colour';
     buildUI();
     processFrame();
   } catch (e) {
+    exitImmersive();  // don't strand the user fullscreen on a dead camera
     statusEl.textContent = 'Camera error: ' + e.message +
       (location.protocol !== 'https:' && location.hostname !== 'localhost'
         ? ' — iOS requires HTTPS for camera access.' : '');
