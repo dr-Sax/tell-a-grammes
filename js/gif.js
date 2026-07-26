@@ -1,11 +1,23 @@
 // ── GIF support ───────────────────────────────────────────────────────────────
 // Animated-GIF playback. A GIF drawn straight from an <img> into a canvas only
-// ever yields ONE static frame — drawImage samples whatever frame the element
-// happens to hold, and never advances. So we decode the GIF into its frames
-// (gifuct-js) and composite them onto an offscreen canvas on a per-frame timer.
-// That canvas is what render.js draws each rAF, so the overlay animates.
+// ever yields ONE static frame, so we decode the GIF (gifuct-js) — but instead
+// of retaining every frame's full-res RGBA patch forever (which is what OOM-
+// killed the tab on mobile: ~5 bytes/px × frames × gifs), we composite the
+// whole loop ONCE at decode time into a capped-size sequence of ImageBitmaps,
+// then discard all gifuct data. Playback just replays the small bitmaps onto
+// the offscreen canvas that render.js draws each rAF.
+//
+// Memory per gif drops from (W × H × 5B × frameCount) to
+// (≤MAX_DIM² × 4B × frameCount) — e.g. a 480px, 100-frame gif goes from
+// ~115 MB resident to ~23 MB, and far less if the source URL is already a
+// downsized rendition.
 
 import { parseGIF, decompressFrames } from 'https://esm.sh/gifuct-js@2.1.2';
+
+// Largest dimension of the stored playback frames. Overlays are poured through
+// a colour stencil and scaled by render.js anyway, so 240px is plenty; raise it
+// if a config genuinely needs crisper full-screen gifs on desktop.
+const MAX_DIM = 240;
 
 // Detect if a file is a GIF by extension or MIME type.
 export function isGif(file) {
@@ -14,28 +26,40 @@ export function isGif(file) {
 }
 
 // Decode `file` and return { el, type:'gif', stop }. `el` is an offscreen canvas
-// at the GIF's logical-screen size, animated in the background; `stop()` halts
-// the timer (called from disposeMedia). The canvas is a valid drawImage source
-// and exposes .width/.height for render.js scaling.
+// at the (capped) output size, animated in the background; `stop()` halts the
+// timer AND closes the frame bitmaps so a pool reload actually frees memory.
 export async function loadGif(file) {
   const buffer = await file.arrayBuffer();
   const gif = parseGIF(buffer);
   const frames = decompressFrames(gif, true);   // true → build RGBA .patch
   if (!frames.length) throw new Error('no frames decoded');
 
-  // The composited output canvas (full logical screen size).
-  const canvas = document.createElement('canvas');
-  canvas.width  = gif.lsd.width;
-  canvas.height = gif.lsd.height;
-  const ctx = canvas.getContext('2d');
+  const W = gif.lsd.width, H = gif.lsd.height;
+  const scale = Math.min(1, MAX_DIM / Math.max(W, H));
+  const outW = Math.max(1, Math.round(W * scale));
+  const outH = Math.max(1, Math.round(H * scale));
 
-  // Scratch canvas: each frame's patch is putImageData'd here, then blitted to
-  // the output at the frame's (left, top). A reused ImageData avoids realloc.
+  // Full-res compositor — TEMPORARY. Used only during this pre-render pass,
+  // then everything full-res becomes garbage.
+  const full = document.createElement('canvas');
+  full.width = W; full.height = H;
+  const fctx = full.getContext('2d');
+
+  // Scratch canvas for putImageData'ing each frame's patch, as before.
   const patchCanvas = document.createElement('canvas');
   const patchCtx = patchCanvas.getContext('2d');
   let patchData = null;
 
-  function drawPatch(frame) {
+  // Pre-render every frame once → small { bmp, delay } records.
+  const rendered = [];
+  let savedState = null;   // for disposal type 3 (restore-to-previous)
+  for (const frame of frames) {
+    // disposal 3 means "after showing this frame, restore what was underneath",
+    // so snapshot the compositor before drawing over it.
+    if (frame.disposalType === 3) {
+      savedState = fctx.getImageData(0, 0, W, H);
+    }
+
     const { width, height, left, top } = frame.dims;
     if (!patchData || patchData.width !== width || patchData.height !== height) {
       patchCanvas.width  = width;
@@ -44,42 +68,46 @@ export async function loadGif(file) {
     }
     patchData.data.set(frame.patch);
     patchCtx.putImageData(patchData, 0, 0);
-    ctx.drawImage(patchCanvas, left, top);
+    fctx.drawImage(patchCanvas, left, top);
+
+    // Snapshot the composited frame at the capped size.
+    const bmp = await createImageBitmap(full, {
+      resizeWidth: outW, resizeHeight: outH, resizeQuality: 'medium',
+    });
+    // GIF delays of 0 (or absurdly small) are treated by browsers as ~100ms.
+    const delay = frame.delay >= 20 ? frame.delay : 100;
+    rendered.push({ bmp, delay });
+
+    // Apply THIS frame's disposal to prep the compositor for the next frame.
+    if (frame.disposalType === 2) {
+      fctx.clearRect(left, top, width, height);
+    } else if (frame.disposalType === 3 && savedState) {
+      fctx.putImageData(savedState, 0, 0);
+    }
+    // disposal 0 / 1 → leave compositor as-is; next frame draws on top
   }
+  frames.length = 0;   // release all decoded patch/pixel arrays to GC
+  savedState = null;
+
+  // Playback canvas at the SMALL size — this is what render.js draws each rAF.
+  const canvas = document.createElement('canvas');
+  canvas.width  = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
 
   let idx = 0;
   let timer = null;
   let stopped = false;
-  let savedState = null;   // for disposal type 3 (restore-to-previous)
 
   function step() {
     if (stopped) return;
-    const frame = frames[idx];
-
-    // disposal 3 means "after showing this frame, restore what was underneath",
-    // so snapshot the canvas before we draw over it.
-    if (frame.disposalType === 3) {
-      savedState = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    }
-
-    drawPatch(frame);
-
-    // GIF delays of 0 (or absurdly small) are treated by browsers as ~100ms.
-    const delay = frame.delay >= 20 ? frame.delay : 100;
-
+    const f = rendered[idx];
+    ctx.clearRect(0, 0, outW, outH);   // each bitmap is fully composited
+    ctx.drawImage(f.bmp, 0, 0);
     timer = setTimeout(() => {
-      // apply THIS frame's disposal to prep the canvas for the next frame
-      if (frame.disposalType === 2) {
-        // restore to background → clear just this frame's rectangle
-        const { width, height, left, top } = frame.dims;
-        ctx.clearRect(left, top, width, height);
-      } else if (frame.disposalType === 3 && savedState) {
-        ctx.putImageData(savedState, 0, 0);
-      }
-      // disposal 0 / 1 → leave canvas as-is; next frame draws on top
-      idx = (idx + 1) % frames.length;
+      idx = (idx + 1) % rendered.length;
       step();
-    }, delay);
+    }, f.delay);
   }
 
   step();
@@ -87,6 +115,11 @@ export async function loadGif(file) {
   return {
     el: canvas,
     type: 'gif',
-    stop() { stopped = true; if (timer) { clearTimeout(timer); timer = null; } },
+    stop() {
+      stopped = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      for (const f of rendered) if (f.bmp.close) f.bmp.close();
+      rendered.length = 0;
+    },
   };
 }
