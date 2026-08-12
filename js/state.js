@@ -17,6 +17,12 @@ export const state = {
   // main.js for the advance and media.js for the cue lookup.
   captionElapsed: Array(N).fill(0),
 
+  // Per-piece fill mode. false = media fills only the pixels of the colour
+  // itself (holes, counters and disconnected regions preserved — the default).
+  // true = "closed fill": the colour's outline claims everything it encloses,
+  // so a drawn ring becomes a solid disc of media. See detect.fillEnclosed.
+  fillClosed: Array(N).fill(false),
+
   // Per-piece media framing. One independent object per piece (built from
   // MEDIA_SLIDERS defaults). Mutated in place by the ui sliders; read fresh by
   // render.js each frame, which is what makes the sliders feel real-time.

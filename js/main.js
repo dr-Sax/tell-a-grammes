@@ -55,7 +55,7 @@ function processFrame(now) {
 
   for (let c = 0; c < palette.length; c++) {
     const pi = palette[c].pi;
-    const res = detectClassStencil(c, PW, PH);
+    const res = detectClassStencil(c, PW, PH, state.fillClosed[pi]);
 
     if (!res) continue;
 

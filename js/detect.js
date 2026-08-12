@@ -399,6 +399,36 @@ function rejectSpecks(w, h, minA) {
   }
 }
 
+// Promote every background pixel that cannot reach the frame border to
+// foreground, marking it 2 in `hard` so the alpha pass knows it is inferred
+// interior rather than detected ink. This is what "closed fill" means: a ring
+// of ink claims everything it encloses, regardless of what colour the
+// enclosed pixels actually are.
+//
+// The background flood is 4-connected — the dual of the 8-connected foreground
+// in rejectSpecks — so a one-pixel diagonal outline still seals its interior.
+// (8-connected background would leak through the very diagonals rejectSpecks
+// works to preserve.)
+function fillEnclosed(w, h) {
+  const n = w * h;
+  labels.fill(0);                       // 1 = background reachable from border
+  let sp = 0, head = 0;
+  const push = (idx) => {
+    if (!hard[idx] && !labels[idx]) { labels[idx] = 1; labelStack[sp++] = idx; }
+  };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (sp > head) {
+    const idx = labelStack[head++];
+    const x = idx % w, y = (idx / w) | 0;
+    if (x > 0)     push(idx - 1);
+    if (x < w - 1) push(idx + 1);
+    if (y > 0)     push(idx - w);
+    if (y < h - 1) push(idx + w);
+  }
+  for (let p = 0; p < n; p++) if (!hard[p] && !labels[p]) hard[p] = 2;
+}
+
 // One colour → one stencil. `c` is a palette index (from classifyFrame).
 // Returns { rgba, w, h, bx, by, bw, bh, filled } — the exact shape render.js's
 // drawFillOverlay consumes. Null if the colour isn't meaningfully present.
@@ -408,7 +438,7 @@ function rejectSpecks(w, h, minA) {
 // stops boundary pixels from strobing under sensor noise. The connected-
 // component pass only gates WHICH pixels may appear — it never quantises their
 // alpha.
-export function detectClassStencil(c, w, h) {
+export function detectClassStencil(c, w, h, closedFill = false) {
   const n = w * h;
   const field = alpha[c];
   if (!field) return null;
@@ -416,6 +446,7 @@ export function detectClassStencil(c, w, h) {
   // hard mask for component analysis: "this pixel is more this colour than not"
   for (let p = 0; p < n; p++) hard[p] = field[p] > 0.5 ? 1 : 0;
   rejectSpecks(w, h, params.minArea);
+  if (closedFill) fillEnclosed(w, h);
 
   let minX = w, minY = h, maxX = -1, maxY = -1;
   let filled = 0;
@@ -423,7 +454,10 @@ export function detectClassStencil(c, w, h) {
   for (let p = 0, q = 0; p < n; p++, q += 4) {
     if (!hard[p]) { rgba[q + 3] = 0; continue; }
     rgba[q] = 255; rgba[q + 1] = 255; rgba[q + 2] = 255;
-    rgba[q + 3] = Math.round(Math.min(1, field[p]) * 255);
+    // Detected ink keeps its smoothed membership alpha (soft edges, no
+    // boundary strobe). Inferred interior is geometric, not colour-thresholded
+    // — it gets full opacity; its outer edge is the ink's own soft edge.
+    rgba[q + 3] = hard[p] === 2 ? 255 : Math.round(Math.min(1, field[p]) * 255);
     const x = p % w, y = (p / w) | 0;
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;

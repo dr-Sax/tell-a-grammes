@@ -158,7 +158,21 @@ export function buildUI() {
       buildUI();
     };
 
-    main.append(sw, lbl, stats, calBtn, clrBtn);
+    // Fill mode: ▢ = ink pixels only (default), ⬛ = closed fill — the colour's
+    // outline claims everything it encloses. Takes effect on the next frame;
+    // no re-calibration involved.
+    const fillBtn = document.createElement('button');
+    fillBtn.className = 'cal-btn' + (state.fillClosed[i] ? ' done' : '');
+    fillBtn.textContent = state.fillClosed[i] ? '⬛' : '▢';
+    fillBtn.title = state.fillClosed[i]
+      ? 'Closed fill: media fills the entire enclosed region'
+      : 'Ink fill: media fills only pixels of this colour';
+    fillBtn.onclick = () => {
+      state.fillClosed[i] = !state.fillClosed[i];
+      buildUI();
+    };
+
+    main.append(sw, lbl, stats, calBtn, fillBtn, clrBtn);
     row.append(main, buildMediaRow(i));
     uiEl.appendChild(row);
   });

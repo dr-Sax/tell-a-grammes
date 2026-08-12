@@ -62,10 +62,14 @@ function getCalData() {
     const isSequence = m && m.type === 'sequence' && m.cues && m.cues.length;
     const hasMediaURL = m && m.sourceURL && !isCaption && !isSequence;
     const adjustTouched = MEDIA_SLIDERS.some(s => state.mediaAdjust[i][s.key] !== s.def);
-    if (!c && !isCaption && !isSequence && !hasMediaURL && !adjustTouched) return null;
+    const closed = state.fillClosed[i];
+    if (!c && !isCaption && !isSequence && !hasMediaURL && !adjustTouched && !closed) return null;
 
     const out = { name: PIECES[i].name, adjust: { ...state.mediaAdjust[i] } };
     if (c) Object.assign(out, { r: c.r, g: c.g, b: c.b });
+    // fill mode: only the non-default is written, so older configs stay
+    // byte-identical and an absent key means "ink pixels only".
+    if (closed) out.fill = 'closed';
     if (isCaption) {
       out.media = { type: 'caption', cues: Object.fromEntries(m.cues.map(cue => [String(cue.t), cue.value])) };
       if (m.link) out.media.link = m.link;
@@ -91,6 +95,8 @@ async function applyCalData(data) {
       // a piece entry may exist for media/framing alone, without colour data
       // (see getCalData) — only treat it as calibrated if r/g/b are present.
       state.calibrated[i] = (c && c.r !== undefined) ? { r: c.r, g: c.g, b: c.b } : null;
+      // full replace, not merge: an absent `fill` resets the piece to default
+      state.fillClosed[i] = !!(c && c.fill === 'closed');
       if (c && c.adjust) {
         // merge over defaults rather than replace outright, so a config
         // saved before a slider was added doesn't leave that key undefined
