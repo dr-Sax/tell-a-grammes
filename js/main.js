@@ -109,10 +109,14 @@ function processFrame(now) {
   requestAnimationFrame(processFrame);
 }
 
-startBtn.onclick = async () => {
-  // Audio and fullscreen first, synchronously: this click is the user gesture
-  // that unlocks both iOS audio playback and requestFullscreen, and the
-  // activation is transient — it can expire across the camera await below.
+const start = async () => {
+  // Audio and fullscreen first, synchronously: when triggered by the Start
+  // button, that click is the user gesture that unlocks both iOS audio
+  // playback and requestFullscreen, and the activation is transient — it can
+  // expire across the camera await below. When triggered by ?autostart=1
+  // (kiosk PCs), there's no gesture: enterImmersive's requestFullscreen
+  // rejection is swallowed internally (the browser is already fullscreen via
+  // --kiosk), and audio relies on --autoplay-policy=no-user-gesture-required.
   startAudio();
   enterImmersive();
   try {
@@ -141,6 +145,8 @@ startBtn.onclick = async () => {
   }
 };
 
+startBtn.onclick = start;
+
 // ── boot ──────────────────────────────────────────────────────────────────────
 wireSliders();
 wireStereoSlider();
@@ -151,5 +157,17 @@ wireMediaLinks();
 syncSliders();
 buildUI();
 
-const configURL = new URLSearchParams(location.search).get('config');
-if (configURL) loadConfigFromURL(configURL);
+const bootParams = new URLSearchParams(location.search);
+const configURL = bootParams.get('config');
+
+// Unattended kiosk boot (?autostart=1): apply the config first so the camera
+// loop never runs uncalibrated, then start. Mobile flow is unchanged — no
+// param, no autostart, the Start button remains the entry point.
+if (bootParams.get('autostart') === '1') {
+  (async () => {
+    if (configURL) await loadConfigFromURL(configURL);
+    await start();
+  })();
+} else if (configURL) {
+  loadConfigFromURL(configURL);
+}
